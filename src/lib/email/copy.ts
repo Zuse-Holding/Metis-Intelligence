@@ -32,7 +32,8 @@ Questions? Just reply to this email.
   };
 }
 
-export function day7Email(firstName: string): EmailContent {
+/** `unsubscribeUrl`: the signed link from ./unsubscribe.ts (CAN-SPAM). */
+export function day7Email(firstName: string, unsubscribeUrl: string): EmailContent {
   const name = firstName?.trim() || "there";
   return {
     subject: "What did Metis get wrong?",
@@ -46,12 +47,15 @@ way we improve is hearing about the specific thing that was outdated,
 missing, or just off. Hit reply and tell us — we read every one of these.
 
 — ${SENDER_NAME}
+
+Don't want emails like this? Unsubscribe: ${unsubscribeUrl}
 `,
     replyTo: SUPPORT_EMAIL,
   };
 }
 
-export function capReachedEmail(firstName: string, capLabel: string): EmailContent {
+/** `unsubscribeUrl`: the signed link from ./unsubscribe.ts (CAN-SPAM). */
+export function capReachedEmail(firstName: string, capLabel: string, unsubscribeUrl: string): EmailContent {
   const name = firstName?.trim() || "there";
   return {
     subject: `You've hit your ${capLabel}`,
@@ -69,6 +73,8 @@ at checkout.
 Questions, or something not adding up? Just reply to this email.
 
 — ${SENDER_NAME}
+
+Don't want emails like this? Unsubscribe: ${unsubscribeUrl}
 `,
   };
 }

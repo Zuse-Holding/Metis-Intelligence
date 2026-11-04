@@ -464,6 +464,12 @@ CREATE INDEX IF NOT EXISTS idx_research_runs_duration
 
 ALTER TABLE profiles ADD COLUMN IF NOT EXISTS pro_grace_expires_at TIMESTAMPTZ;
 
+-- Email unsubscribe (CAN-SPAM). Set by the agent server's /email/unsubscribe
+-- from a signed link (src/lib/email/unsubscribe.ts); the day-7 and
+-- cap-reached emails skip anyone with it set. Account emails (password
+-- resets) ignore it. Run before deploying the code that reads it.
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS email_opt_out_at TIMESTAMPTZ;
+
 -- ============================================================
 -- Report issue reports (task 3.4 — "Something wrong in this report?")
 -- run_id is a plain TEXT reference to either research_runs.id or

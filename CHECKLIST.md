@@ -54,6 +54,16 @@ env var *names* (values not read). Ordered by what hurts most if missed.
 - [ ] **PostHog:** `POSTHOG_KEY` isn't set on Vercel (see "Analytics"
   below). Without it the soft launch's sign-up → checkout funnel isn't
   visible.
+- [ ] **Email unsubscribe migration, then deploy.** Run the
+  `email_opt_out_at` block in `supabase/schema.sql` on Metis Intelligence
+  *before* deploying the unsubscribe change: the day-7 job and the
+  cap-reached email read that column, and the day-7 job fails loudly
+  without it. The Railway service that runs `run-daily-creator-jobs.mjs`
+  also needs `AGENT_SECRET` (the links are signed with it); the job sends
+  nothing rather than an email with no working unsubscribe.
+- [ ] **CAN-SPAM postal address.** Commercial emails (cap-reached, likely
+  day-7) must also show a valid postal address. Add one to the footer in
+  `src/lib/email/copy.ts` once there's an address to use.
 - [ ] **Legal review** (see below): include person search with name +
   location (#38). Location is used only to pick the right person and
   reports never show addresses or contact details, but name + city is how
