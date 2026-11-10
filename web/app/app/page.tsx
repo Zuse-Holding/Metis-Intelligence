@@ -15,6 +15,7 @@ import ResearchSkeleton, { type RunProgress } from "../../components/ResearchSke
 import EmptyState from "../../components/EmptyState";
 import { Skeleton, SkeletonText, Spinner } from "../../components/Skeleton";
 import { trackClientEvent } from "../../lib/analytics-client";
+import { useTier } from "../../lib/tier-context";
 import styles from "./page.module.css";
 
 interface Run {
@@ -72,6 +73,8 @@ function Dashboard() {
   const [pending, setPending]     = useState<{ subject: string; type: "company" | "person" | "product" | "political" | "creator" } | null>(null);
   const selectedRef               = useRef<Run | null>(null);
   const [isWatching, setIsWatching] = useState(false);
+  const { can } = useTier();
+  const [accountState, setAccountState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const pendingPollRef            = useRef<ReturnType<typeof setInterval> | null>(null);
   const [progress, setProgress]   = useState<RunProgress[]>([]);
 
@@ -118,7 +121,13 @@ function Dashboard() {
       .then(([data, running]) => {
         // selectRun flips `loading` on synchronously, so the report panel
         // hands off from the initial ghost straight to the report ghost.
-        if (!running && data.length > 0) selectRun(data[0]);
+        if (running) return;
+        // /app?run=<id> (from Accounts or an exported link) opens that report.
+        const wanted = searchParams.get("run");
+        const linked = wanted ? data.find((r) => r.id === wanted) : undefined;
+        if (wanted) router.replace("/app");
+        if (linked) selectRun(linked);
+        else if (data.length > 0) selectRun(data[0]);
       })
       .catch(() => {})
       .finally(() => setInitialLoading(false));
@@ -154,6 +163,7 @@ function Dashboard() {
     runSuggestion(subject, "company");
   }, [searchParams]);
  useEffect(() => {
+  setAccountState("idle");
   if (!selected) { setIsWatching(false); return; }
   fetch("/api/watchlist")
     .then(r => r.json())
@@ -394,6 +404,32 @@ function Dashboard() {
 >
   {isWatching ? "● Watching" : "◎ Watch"}
 </button>
+                    {selected.type === "company" && can("accountsAccess") && (
+                      <button
+                        className={`${styles.actionBtn} ${accountState === "saved" ? styles.watching : ""}`}
+                        disabled={accountState === "saving" || accountState === "saved"}
+                        onClick={async () => {
+                          if (!selected) return;
+                          setAccountState("saving");
+                          try {
+                            const res = await fetch("/api/accounts", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ company: selected.subject }),
+                            });
+                            setAccountState(res.ok ? "saved" : "error");
+                          } catch {
+                            setAccountState("error");
+                          }
+                        }}
+                        title={accountState === "error" ? "Couldn't save. Try again." : "Save to your account pipeline"}
+                      >
+                        {accountState === "saving" ? <><Spinner size={10} /> Saving...</>
+                          : accountState === "saved" ? "✓ In accounts"
+                          : accountState === "error" ? "Retry save"
+                          : "+ Save to accounts"}
+                      </button>
+                    )}
                     <button
                       className={styles.actionBtn}
                       disabled={rerunning}

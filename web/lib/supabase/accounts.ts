@@ -1,0 +1,254 @@
+import { createServerSupabaseClient, createServiceClient } from "./server";
+import { getAgentSecret } from "../agent-secret";
+import { trackEvent } from "../analytics";
+import { newFindings, type AccountPatch, type AccountStage, type ChangedFinding, type FindingLike } from "../accounts";
+
+/**
+ * Account pipeline data layer. Reads go through the signed-in user's client
+ * (RLS limits them to their own rows); writes use the service role, because
+ * the accounts table is read-only to its owner (see supabase/schema.sql),
+ * and every write is scoped to the caller's user_id.
+ */
+
+/** Per-user cap, so one account can't fill the table. Far above real use. */
+export const MAX_ACCOUNTS_PER_USER = 500;
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export function isUuid(value: string): boolean {
+  return UUID_RE.test(value);
+}
+
+export interface Account {
+  id: string;
+  company: string;
+  stage: AccountStage;
+  owner: string | null;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+  latestRun: { id: string; generatedAt: string } | null;
+  /** Completed company reports for this account; "what changed" needs 2. */
+  runCount: number;
+}
+
+export type AccessResult =
+  | { ok: true; userId: string }
+  | { ok: false; status: 401 | 403 | 503; error: string };
+
+/**
+ * The signed-in user, if their plan includes the account pipeline. Fails
+ * closed: if the plan can't be checked, the request is refused. The one
+ * exception is local development with no agent server configured.
+ */
+export async function requireAccountsAccess(): Promise<AccessResult> {
+  const supabase = await createServerSupabaseClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, status: 401, error: "Your session expired. Sign in again." };
+
+  const agentUrl = process.env.AGENT_SERVER_URL;
+  if (!agentUrl) {
+    if (process.env.NODE_ENV !== "production") return { ok: true, userId: user.id };
+    return { ok: false, status: 503, error: "Couldn't check your plan. Try again in a minute." };
+  }
+  try {
+    const res = await fetch(`${agentUrl}/tier/${user.id}`, {
+      headers: { "x-agent-secret": getAgentSecret() },
+      cache: "no-store",
+    });
+    if (!res.ok) return { ok: false, status: 503, error: "Couldn't check your plan. Try again in a minute." };
+    const data = await res.json();
+    if (data?.config?.accountsAccess !== true) {
+      return { ok: false, status: 403, error: "Accounts are part of Pro. Upgrade at metisanalytic.com/pricing." };
+    }
+    return { ok: true, userId: user.id };
+  } catch (err) {
+    console.error("[accounts] tier check failed:", err instanceof Error ? err.message : err);
+    return { ok: false, status: 503, error: "Couldn't check your plan. Try again in a minute." };
+  }
+}
+
+interface AccountRow {
+  id: string;
+  company: string;
+  stage: AccountStage;
+  owner: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface RunRow {
+  id: string;
+  subject: string;
+  generated_at: string;
+}
+
+const subjectKey = (s: string) => s.trim().toLowerCase();
+
+/** Completed, non-deleted company reports for the user, newest first. */
+async function companyRuns(userId: string): Promise<RunRow[]> {
+  const supabase = await createServerSupabaseClient();
+  const { data, error } = await supabase
+    .from("research_runs")
+    .select("id, subject, generated_at")
+    .eq("user_id", userId)
+    .eq("type", "company")
+    .eq("status", "completed")
+    .order("generated_at", { ascending: false });
+  if (error) throw error;
+  return (data ?? []) as RunRow[];
+}
+
+export async function listAccounts(userId: string): Promise<Account[]> {
+  const supabase = await createServerSupabaseClient();
+  const [{ data, error }, runs] = await Promise.all([
+    supabase
+      .from("accounts")
+      .select("id, company, stage, owner, notes, created_at, updated_at")
+      .eq("user_id", userId)
+      .order("updated_at", { ascending: false }),
+    companyRuns(userId),
+  ]);
+  if (error) throw error;
+
+  // Runs arrive newest-first, so the first one per subject is the latest.
+  const bySubject = new Map<string, { latest: RunRow; count: number }>();
+  for (const run of runs) {
+    const key = subjectKey(run.subject);
+    const entry = bySubject.get(key);
+    if (entry) entry.count += 1;
+    else bySubject.set(key, { latest: run, count: 1 });
+  }
+
+  return ((data ?? []) as AccountRow[]).map((row) => {
+    const match = bySubject.get(subjectKey(row.company));
+    return {
+      id: row.id,
+      company: row.company,
+      stage: row.stage,
+      owner: row.owner,
+      notes: row.notes,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      latestRun: match ? { id: match.latest.id, generatedAt: match.latest.generated_at } : null,
+      runCount: match?.count ?? 0,
+    };
+  });
+}
+
+export type CreateResult =
+  | { ok: true; id: string; existed: boolean }
+  | { ok: false; status: 409; error: string };
+
+/** Saves a company. Saving one that's already on the list returns it. */
+export async function createAccount(userId: string, company: string): Promise<CreateResult> {
+  const service = createServiceClient();
+
+  const { data: existing } = await service
+    .from("accounts")
+    .select("id")
+    .eq("user_id", userId)
+    .ilike("company", company.replace(/[\\%_]/g, (c: string) => `\\${c}`))
+    .maybeSingle();
+  if (existing) return { ok: true, id: existing.id as string, existed: true };
+
+  const { count } = await service
+    .from("accounts")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId);
+  if ((count ?? 0) >= MAX_ACCOUNTS_PER_USER) {
+    return { ok: false, status: 409, error: `You can save up to ${MAX_ACCOUNTS_PER_USER} accounts. Remove some to add more.` };
+  }
+
+  const { data, error } = await service
+    .from("accounts")
+    .insert({ user_id: userId, company })
+    .select("id")
+    .single();
+  if (error) {
+    // Two saves at once: the unique index wins, so return the row it kept.
+    if (error.code === "23505") {
+      const { data: row } = await service
+        .from("accounts")
+        .select("id")
+        .eq("user_id", userId)
+        .ilike("company", company.replace(/[\\%_]/g, (c: string) => `\\${c}`))
+        .maybeSingle();
+      if (row) return { ok: true, id: row.id as string, existed: true };
+    }
+    throw error;
+  }
+  trackEvent(userId, "account_add", {});
+  return { ok: true, id: data.id as string, existed: false };
+}
+
+/** False when the account doesn't exist or isn't the caller's. */
+export async function updateAccount(userId: string, id: string, patch: AccountPatch): Promise<boolean> {
+  const service = createServiceClient();
+  const { data, error } = await service
+    .from("accounts")
+    .update({ ...patch, updated_at: new Date().toISOString() })
+    .eq("id", id)
+    .eq("user_id", userId)
+    .select("id");
+  if (error) throw error;
+  if (patch.stage) trackEvent(userId, "account_stage", { stage: patch.stage });
+  return (data ?? []).length > 0;
+}
+
+export async function deleteAccount(userId: string, id: string): Promise<boolean> {
+  const service = createServiceClient();
+  const { data, error } = await service
+    .from("accounts")
+    .delete()
+    .eq("id", id)
+    .eq("user_id", userId)
+    .select("id");
+  if (error) throw error;
+  return (data ?? []).length > 0;
+}
+
+export interface AccountChanges {
+  latestRunAt: string | null;
+  previousRunAt: string | null;
+  /** Null when there's nothing to compare (fewer than two reports). */
+  added: ChangedFinding[] | null;
+}
+
+/** What the latest report found that the one before it didn't. */
+export async function accountChanges(userId: string, id: string): Promise<AccountChanges | null> {
+  const supabase = await createServerSupabaseClient();
+  const { data: account, error } = await supabase
+    .from("accounts")
+    .select("company")
+    .eq("id", id)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!account) return null;
+
+  const key = subjectKey(account.company as string);
+  const runs = (await companyRuns(userId)).filter((r) => subjectKey(r.subject) === key);
+  const [latest, previous] = runs;
+  if (!latest || !previous) {
+    return { latestRunAt: latest?.generated_at ?? null, previousRunAt: null, added: null };
+  }
+
+  const { data: findings, error: fErr } = await supabase
+    .from("findings")
+    .select("run_id, section, claim, source_name, source_url, created_at")
+    .eq("user_id", userId)
+    .in("run_id", [latest.id, previous.id])
+    .order("created_at", { ascending: true });
+  if (fErr) throw fErr;
+
+  const rows = (findings ?? []) as (FindingLike & { run_id: string })[];
+  return {
+    latestRunAt: latest.generated_at,
+    previousRunAt: previous.generated_at,
+    added: newFindings(
+      rows.filter((f) => f.run_id === previous.id),
+      rows.filter((f) => f.run_id === latest.id),
+    ),
+  };
+}

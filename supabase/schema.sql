@@ -853,3 +853,37 @@ CREATE POLICY "Users manage own seller offer"
   WITH CHECK (auth.uid() = user_id);
 
 REVOKE ALL ON seller_offers FROM anon;
+
+-- Account pipeline (ABM brief §4, Nov 2026)
+-- A sales rep's list of target companies: stage, owner, notes. The latest
+-- report is looked up by subject at read time (not stored), so a re-run is
+-- picked up without a write here. Read-only for the owner, like
+-- research_runs: the web API routes write with the service role after
+-- checking the plan (accountsAccess), so a Free account can't use the
+-- feature by calling Supabase directly with the anon key.
+-- Owner is free text until teams exist.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS accounts (
+  id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id     UUID        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  company     TEXT        NOT NULL CHECK (char_length(company) BETWEEN 1 AND 200),
+  stage       TEXT        NOT NULL DEFAULT 'researching'
+                          CHECK (stage IN ('researching', 'contacted', 'meeting', 'proposal', 'won', 'lost')),
+  owner       TEXT        CHECK (owner IS NULL OR char_length(owner) <= 120),
+  notes       TEXT        CHECK (notes IS NULL OR char_length(notes) <= 5000),
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS accounts_user_company_key ON accounts (user_id, lower(company));
+
+ALTER TABLE accounts ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users read own accounts" ON accounts;
+CREATE POLICY "Users read own accounts"
+  ON accounts FOR SELECT
+  USING (auth.uid() = user_id);
+
+REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON accounts FROM anon, authenticated;
+REVOKE ALL ON accounts FROM anon;

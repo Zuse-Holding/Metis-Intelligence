@@ -167,6 +167,10 @@ interface TierConfig {
   // radius than a paid-tier upsell before it's been proven out). Revisit
   // once it's been run against enough real names to trust the signal.
   creatorAccess: boolean;
+  // Account pipeline (ABM brief §4): saved target companies with stage,
+  // owner, notes and CSV export. Pro and above; the web API routes check it
+  // before every write (the accounts table is read-only to its owner).
+  accountsAccess: boolean;
 }
 
 // Phase 1 fair-use soft caps — env-configurable per the spec, rather than
@@ -178,23 +182,23 @@ const RATE_LIMIT_FREE_PER_HOUR = Number(process.env.RATE_LIMIT_FREE_PER_HOUR ?? 
 const RATE_LIMIT_PAID_PER_HOUR = Number(process.env.RATE_LIMIT_PAID_PER_HOUR ?? 30);
 
 const TIER_CONFIG: Record<Tier, TierConfig> = {
-  internal: { windowResearchLimit: -1, windowDeepDiveLimit: -1, deepDiveAccess: true, politicalAccess: true, watchlistLimit: -1, knowledgeGraphAccess: true, exportAccess: true, charonProtocol: true, chatWidgetAccess: true, personResearchAccess: true, personSearchAccess: true, muckrockAccess: true, adminAccess: true, monthlyResearchLimit: -1, lifetimeResearchLimit: -1, monthlyDeepDiveLimit: -1, hourlyResearchLimit: -1, publicRecordsAccess: true, creatorAccess: true },
+  internal: { windowResearchLimit: -1, windowDeepDiveLimit: -1, deepDiveAccess: true, politicalAccess: true, watchlistLimit: -1, knowledgeGraphAccess: true, exportAccess: true, charonProtocol: true, chatWidgetAccess: true, personResearchAccess: true, personSearchAccess: true, muckrockAccess: true, adminAccess: true, monthlyResearchLimit: -1, lifetimeResearchLimit: -1, monthlyDeepDiveLimit: -1, hourlyResearchLimit: -1, publicRecordsAccess: true, creatorAccess: true, accountsAccess: true },
   // Team is not sold (Phase 1 task 1.6) — left exactly as-is otherwise;
   // may be relabeled/reworked once the multi-seat workspace feature
   // (docs/team-features-scoping.md) actually exists.
-  team:     { windowResearchLimit: 200, windowDeepDiveLimit: 20, deepDiveAccess: true, politicalAccess: true, watchlistLimit: 50, knowledgeGraphAccess: true, exportAccess: true, charonProtocol: false, chatWidgetAccess: true, personResearchAccess: false, personSearchAccess: true, muckrockAccess: false, adminAccess: false, monthlyResearchLimit: -1, lifetimeResearchLimit: -1, monthlyDeepDiveLimit: -1, hourlyResearchLimit: RATE_LIMIT_PAID_PER_HOUR, publicRecordsAccess: true, creatorAccess: false },
+  team:     { windowResearchLimit: 200, windowDeepDiveLimit: 20, deepDiveAccess: true, politicalAccess: true, watchlistLimit: 50, knowledgeGraphAccess: true, exportAccess: true, charonProtocol: false, chatWidgetAccess: true, personResearchAccess: false, personSearchAccess: true, muckrockAccess: false, adminAccess: false, monthlyResearchLimit: -1, lifetimeResearchLimit: -1, monthlyDeepDiveLimit: -1, hourlyResearchLimit: RATE_LIMIT_PAID_PER_HOUR, publicRecordsAccess: true, creatorAccess: false, accountsAccess: true },
   // Pro: quick-profile and Deep Dive caps are both monthly fair-use soft
   // caps now, not unlimited — windowDeepDiveLimit set to -1 since
   // monthlyDeepDiveLimit replaces it for this tier specifically.
-  pro:      { windowResearchLimit: 50, windowDeepDiveLimit: -1, deepDiveAccess: true, politicalAccess: true, watchlistLimit: -1, knowledgeGraphAccess: true, exportAccess: true, charonProtocol: false, chatWidgetAccess: true, personResearchAccess: false, personSearchAccess: true, muckrockAccess: false, adminAccess: false, monthlyResearchLimit: PRO_MONTHLY_RESEARCH_LIMIT, lifetimeResearchLimit: -1, monthlyDeepDiveLimit: PRO_MONTHLY_DEEP_DIVE_LIMIT, hourlyResearchLimit: RATE_LIMIT_PAID_PER_HOUR, publicRecordsAccess: true, creatorAccess: false },
+  pro:      { windowResearchLimit: 50, windowDeepDiveLimit: -1, deepDiveAccess: true, politicalAccess: true, watchlistLimit: -1, knowledgeGraphAccess: true, exportAccess: true, charonProtocol: false, chatWidgetAccess: true, personResearchAccess: false, personSearchAccess: true, muckrockAccess: false, adminAccess: false, monthlyResearchLimit: PRO_MONTHLY_RESEARCH_LIMIT, lifetimeResearchLimit: -1, monthlyDeepDiveLimit: PRO_MONTHLY_DEEP_DIVE_LIMIT, hourlyResearchLimit: RATE_LIMIT_PAID_PER_HOUR, publicRecordsAccess: true, creatorAccess: false, accountsAccess: true },
   // Basic: PDF export added (Phase 1 task 1.6 — was withheld before).
-  basic:    { windowResearchLimit: 10, windowDeepDiveLimit: 0, deepDiveAccess: false, politicalAccess: false, watchlistLimit: 5, knowledgeGraphAccess: false, exportAccess: true, charonProtocol: false, chatWidgetAccess: false, personResearchAccess: false, personSearchAccess: true, muckrockAccess: false, adminAccess: false, monthlyResearchLimit: 25, lifetimeResearchLimit: -1, monthlyDeepDiveLimit: -1, hourlyResearchLimit: RATE_LIMIT_PAID_PER_HOUR, publicRecordsAccess: false, creatorAccess: false },
+  basic:    { windowResearchLimit: 10, windowDeepDiveLimit: 0, deepDiveAccess: false, politicalAccess: false, watchlistLimit: 5, knowledgeGraphAccess: false, exportAccess: true, charonProtocol: false, chatWidgetAccess: false, personResearchAccess: false, personSearchAccess: true, muckrockAccess: false, adminAccess: false, monthlyResearchLimit: 25, lifetimeResearchLimit: -1, monthlyDeepDiveLimit: -1, hourlyResearchLimit: RATE_LIMIT_PAID_PER_HOUR, publicRecordsAccess: false, creatorAccess: false, accountsAccess: false },
   // Free (Phase 1): the real default for new signups now (see getUserTier
   // below) — 3 quick profiles LIFETIME, not recurring, hence
   // windowResearchLimit/monthlyResearchLimit both -1 here and the cap
   // living entirely in lifetimeResearchLimit. 1 watchlist entity, no
   // Deep Dive, no export.
-  free:     { windowResearchLimit: -1, windowDeepDiveLimit: 0, deepDiveAccess: false, politicalAccess: false, watchlistLimit: 1, knowledgeGraphAccess: false, exportAccess: false, charonProtocol: false, chatWidgetAccess: false, personResearchAccess: false, personSearchAccess: false, muckrockAccess: false, adminAccess: false, monthlyResearchLimit: -1, lifetimeResearchLimit: 3, monthlyDeepDiveLimit: -1, hourlyResearchLimit: RATE_LIMIT_FREE_PER_HOUR, publicRecordsAccess: false, creatorAccess: false },
+  free:     { windowResearchLimit: -1, windowDeepDiveLimit: 0, deepDiveAccess: false, politicalAccess: false, watchlistLimit: 1, knowledgeGraphAccess: false, exportAccess: false, charonProtocol: false, chatWidgetAccess: false, personResearchAccess: false, personSearchAccess: false, muckrockAccess: false, adminAccess: false, monthlyResearchLimit: -1, lifetimeResearchLimit: 3, monthlyDeepDiveLimit: -1, hourlyResearchLimit: RATE_LIMIT_FREE_PER_HOUR, publicRecordsAccess: false, creatorAccess: false, accountsAccess: false },
   // Time-boxed tier for external demo/partner accounts (limited partners,
   // investor trials, etc). Deliberately mirrors "team" limits and features
   // so the demo shows the platform at full strength — the ONLY things it
@@ -202,7 +206,7 @@ const TIER_CONFIG: Record<Tier, TierConfig> = {
   // which stay off regardless of what tier
   // gets requested for these accounts. Expiry enforced via
   // profiles.trial_expires_at, checked in getUserTier below.
-  trial:    { windowResearchLimit: 200, windowDeepDiveLimit: 20, deepDiveAccess: true, politicalAccess: false, watchlistLimit: 50, knowledgeGraphAccess: true, exportAccess: true, charonProtocol: false, chatWidgetAccess: true, personResearchAccess: false, personSearchAccess: true, muckrockAccess: false, adminAccess: false, monthlyResearchLimit: -1, lifetimeResearchLimit: -1, monthlyDeepDiveLimit: -1, hourlyResearchLimit: -1, publicRecordsAccess: true, creatorAccess: false },
+  trial:    { windowResearchLimit: 200, windowDeepDiveLimit: 20, deepDiveAccess: true, politicalAccess: false, watchlistLimit: 50, knowledgeGraphAccess: true, exportAccess: true, charonProtocol: false, chatWidgetAccess: true, personResearchAccess: false, personSearchAccess: true, muckrockAccess: false, adminAccess: false, monthlyResearchLimit: -1, lifetimeResearchLimit: -1, monthlyDeepDiveLimit: -1, hourlyResearchLimit: -1, publicRecordsAccess: true, creatorAccess: false, accountsAccess: true },
 };
 
 /**
@@ -257,7 +261,7 @@ const EXPIRED_CONFIG: TierConfig = {
   personResearchAccess: false, personSearchAccess: false, muckrockAccess: false, adminAccess: false,
   monthlyResearchLimit: 0, lifetimeResearchLimit: 0, monthlyDeepDiveLimit: 0,
   hourlyResearchLimit: 0,
-  publicRecordsAccess: false, creatorAccess: false,
+  publicRecordsAccess: false, creatorAccess: false, accountsAccess: false,
 };
 
 function getTierConfig(tier: Tier | "expired"): TierConfig {
