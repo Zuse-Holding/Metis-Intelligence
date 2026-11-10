@@ -7,12 +7,15 @@ export async function GET(req: NextRequest) {
   const access = await requireAccountsAccess();
   if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status });
   try {
-    const accounts = await listAccounts(access.userId);
+    const { accounts } = await listAccounts(access.userId);
     const origin = req.nextUrl.origin;
     const csv = accountsToCsv(
       accounts.map((a) => ({
         company: a.company,
         stage: a.stage,
+        dealValue: a.dealValue,
+        nextStep: a.nextStep,
+        health: a.health,
         owner: a.owner,
         notes: a.notes,
         latestReportAt: a.latestRun?.generatedAt ?? null,

@@ -872,6 +872,13 @@ CREATE TABLE IF NOT EXISTS accounts (
                           CHECK (stage IN ('researching', 'contacted', 'meeting', 'proposal', 'won', 'lost')),
   owner       TEXT        CHECK (owner IS NULL OR char_length(owner) <= 120),
   notes       TEXT        CHECK (notes IS NULL OR char_length(notes) <= 5000),
+  -- One deal per account (pipeline, ABM brief §4).
+  deal_value  NUMERIC(14,2) CHECK (deal_value IS NULL OR deal_value >= 0),
+  next_step   TEXT        CHECK (next_step IS NULL OR char_length(next_step) <= 300),
+  -- "Stalled" is measured from the last stage change, not the last edit.
+  stage_changed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  -- Scheduled refresh claim, so two servers never refresh the same account.
+  refresh_claimed_at TIMESTAMPTZ,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -887,3 +894,58 @@ CREATE POLICY "Users read own accounts"
 
 REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON accounts FROM anon, authenticated;
 REVOKE ALL ON accounts FROM anon;
+
+
+-- ============================================================
+-- Pipeline triggers and scheduled refreshes (ABM brief §4, Nov 2026)
+-- Apply BEFORE deploying the code that reads research_runs.scheduled:
+-- every plan counter filters on it, and a missing column denies all runs.
+-- ============================================================
+
+-- Weekly refreshes of saved accounts run on the agent server and don't
+-- count toward the user's plan. Only the service role writes research_runs,
+-- and the web app can't set this (the agent server marks it from an
+-- in-memory token), so it can't be used to dodge a cap.
+ALTER TABLE research_runs ADD COLUMN IF NOT EXISTS scheduled BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- What changed at an account between two reports. Written by the agent
+-- server when a report on a saved account finishes; read-only to the owner.
+CREATE TABLE IF NOT EXISTS account_triggers (
+  id           UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  account_id   UUID        NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  user_id      UUID        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  run_id       UUID        REFERENCES research_runs(id) ON DELETE SET NULL,
+  kind         TEXT        NOT NULL CHECK (kind IN (
+                 'leadership_change', 'layoffs', 'budget_cut', 'acquisition', 'lawsuit', 'competitor_adopted',
+                 'funding', 'expansion', 'federal_award', 'tech_added', 'tech_removed')),
+  at_risk      BOOLEAN     NOT NULL DEFAULT FALSE,
+  title        TEXT        NOT NULL CHECK (char_length(title) BETWEEN 1 AND 300),
+  url          TEXT        NOT NULL,
+  event_date   TEXT,
+  detected_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (account_id, kind, title)
+);
+CREATE INDEX IF NOT EXISTS account_triggers_user_detected ON account_triggers (user_id, detected_at DESC);
+
+ALTER TABLE account_triggers ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Users read own account triggers" ON account_triggers;
+CREATE POLICY "Users read own account triggers"
+  ON account_triggers FOR SELECT
+  USING (auth.uid() = user_id);
+REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON account_triggers FROM anon, authenticated;
+REVOKE ALL ON account_triggers FROM anon;
+
+-- Per-user pipeline settings: days without a stage change before a deal
+-- shows as stalled. Plain user data, so the owner reads and writes it.
+CREATE TABLE IF NOT EXISTS pipeline_settings (
+  user_id     UUID        PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  stall_days  INTEGER     NOT NULL DEFAULT 14 CHECK (stall_days BETWEEN 1 AND 365),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+ALTER TABLE pipeline_settings ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Users manage own pipeline settings" ON pipeline_settings;
+CREATE POLICY "Users manage own pipeline settings"
+  ON pipeline_settings FOR ALL
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+REVOKE ALL ON pipeline_settings FROM anon;

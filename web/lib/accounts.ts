@@ -18,6 +18,8 @@ export const STAGE_LABELS: Record<AccountStage, string> = {
 export const MAX_COMPANY_LENGTH = 200;
 export const MAX_OWNER_LENGTH = 120;
 export const MAX_NOTES_LENGTH = 5000;
+export const MAX_NEXT_STEP_LENGTH = 300;
+export const MAX_DEAL_VALUE = 1_000_000_000_000;
 
 export function isAccountStage(value: unknown): value is AccountStage {
   return typeof value === "string" && (ACCOUNT_STAGES as readonly string[]).includes(value);
@@ -33,6 +35,8 @@ export interface AccountPatch {
   stage?: AccountStage;
   owner?: string | null;
   notes?: string | null;
+  dealValue?: number | null;
+  nextStep?: string | null;
 }
 
 /**
@@ -59,6 +63,22 @@ export function parseAccountPatch(body: unknown): { ok: true; patch: AccountPatc
     const notes = input.notes === null ? "" : clean(input.notes, true);
     if (notes.length > MAX_NOTES_LENGTH) return { ok: false, error: `Notes can be at most ${MAX_NOTES_LENGTH} characters.` };
     patch.notes = notes || null;
+  }
+
+  if ("dealValue" in input) {
+    const v = input.dealValue;
+    if (v === null || v === "") patch.dealValue = null;
+    else {
+      const n = typeof v === "number" ? v : typeof v === "string" ? Number(v.replace(/[$,\s]/g, "")) : NaN;
+      if (!Number.isFinite(n) || n < 0 || n > MAX_DEAL_VALUE) return { ok: false, error: "Deal value must be a positive amount." };
+      patch.dealValue = Math.round(n * 100) / 100;
+    }
+  }
+  if ("nextStep" in input) {
+    if (input.nextStep !== null && typeof input.nextStep !== "string") return { ok: false, error: "Next step must be text." };
+    const step = input.nextStep === null ? "" : clean(input.nextStep, false);
+    if (step.length > MAX_NEXT_STEP_LENGTH) return { ok: false, error: `Next step can be at most ${MAX_NEXT_STEP_LENGTH} characters.` };
+    patch.nextStep = step || null;
   }
 
   if (Object.keys(patch).length === 0) return { ok: false, error: "Nothing to update." };
@@ -124,11 +144,90 @@ export function newFindings(previous: FindingLike[], latest: FindingLike[]): Cha
   return out;
 }
 
+// ── Deal health and ranking ──────────────────────────────────────────────────
+
+export interface AccountTrigger {
+  kind: string;
+  atRisk: boolean;
+  title: string;
+  url: string;
+  eventDate: string | null;
+  detectedAt: string;
+}
+
+export type Health = "at_risk" | "stalled" | "on_track" | "closed";
+
+export const HEALTH_LABELS: Record<Health, string> = {
+  at_risk: "At risk",
+  stalled: "Stalled",
+  on_track: "On track",
+  closed: "Closed",
+};
+
+export const DEFAULT_STALL_DAYS = 14;
+/** At-risk triggers this recent flag a deal. */
+export const AT_RISK_WINDOW_DAYS = 30;
+/** Triggers this recent count as fresh for ranking. */
+export const FRESH_DAYS = 14;
+const DAY_MS = 86_400_000;
+
+export function parseStallDays(value: unknown): number | null {
+  const n = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  return Number.isInteger(n) && n >= 1 && n <= 365 ? n : null;
+}
+
+/**
+ * At risk: an at-risk trigger in the last 30 days. Stalled: no stage change
+ * in `stallDays`. Won and lost deals are closed. At risk wins over stalled.
+ */
+export function dealHealth(
+  a: { stage: AccountStage; stageChangedAt: string; triggers: AccountTrigger[] },
+  stallDays: number,
+  now = new Date(),
+): { health: Health; reasons: string[] } {
+  if (a.stage === "won" || a.stage === "lost") return { health: "closed", reasons: [] };
+  const risky = a.triggers.filter((t) => t.atRisk && now.getTime() - Date.parse(t.detectedAt) <= AT_RISK_WINDOW_DAYS * DAY_MS);
+  if (risky.length) return { health: "at_risk", reasons: risky.map((t) => t.title) };
+  const idle = Math.floor((now.getTime() - Date.parse(a.stageChangedAt)) / DAY_MS);
+  if (idle >= stallDays) return { health: "stalled", reasons: [`No stage change in ${idle} days`] };
+  return { health: "on_track", reasons: [] };
+}
+
+export function freshTriggerCount(triggers: AccountTrigger[], now = new Date()): number {
+  return triggers.filter((t) => now.getTime() - Date.parse(t.detectedAt) <= FRESH_DAYS * DAY_MS).length;
+}
+
+const HEALTH_ORDER: Record<Health, number> = { at_risk: 0, stalled: 1, on_track: 2, closed: 3 };
+
+/** Work these first: most fresh triggers, then at risk, then stalled. */
+export function rankAccounts<T extends { health: Health; freshTriggers: number; updatedAt: string }>(accounts: T[]): T[] {
+  return [...accounts].sort((a, b) =>
+    b.freshTriggers - a.freshTriggers
+    || HEALTH_ORDER[a.health] - HEALTH_ORDER[b.health]
+    || b.updatedAt.localeCompare(a.updatedAt));
+}
+
+/** Count and total deal value per stage, in pipeline order. */
+export function stageTotals(accounts: { stage: AccountStage; dealValue: number | null }[]): { stage: AccountStage; count: number; total: number }[] {
+  return ACCOUNT_STAGES.map((stage) => {
+    const inStage = accounts.filter((a) => a.stage === stage);
+    return { stage, count: inStage.length, total: inStage.reduce((sum, a) => sum + (a.dealValue ?? 0), 0) };
+  });
+}
+
+export function formatMoney(n: number | null | undefined): string {
+  if (n === null || n === undefined) return "—";
+  return n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: n % 1 === 0 ? 0 : 2 });
+}
+
 // ── CSV export ───────────────────────────────────────────────────────────────
 
 export interface AccountCsvRow {
   company: string;
   stage: AccountStage;
+  dealValue: number | null;
+  nextStep: string | null;
+  health: Health;
   owner: string | null;
   notes: string | null;
   latestReportAt: string | null;
@@ -137,7 +236,7 @@ export interface AccountCsvRow {
   updatedAt: string;
 }
 
-export const CSV_HEADERS = ["Company", "Domain", "Stage", "Owner", "Notes", "Latest report", "Report link", "Added", "Updated"];
+export const CSV_HEADERS = ["Company", "Domain", "Stage", "Deal value", "Health", "Owner", "Next step", "Notes", "Latest report", "Report link", "Added", "Updated"];
 
 /**
  * One CSV cell. Quotes when needed, and neutralises spreadsheet formulas: a
@@ -168,7 +267,10 @@ export function accountsToCsv(rows: AccountCsvRow[]): string {
         name,
         domain,
         STAGE_LABELS[r.stage],
+        r.dealValue === null ? "" : r.dealValue.toFixed(2),
+        HEALTH_LABELS[r.health],
         r.owner,
+        r.nextStep,
         r.notes,
         isoDate(r.latestReportAt),
         r.latestReportUrl,

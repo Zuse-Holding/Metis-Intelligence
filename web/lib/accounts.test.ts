@@ -3,6 +3,13 @@ import assert from "node:assert/strict";
 import {
   accountsToCsv,
   csvCell,
+  dealHealth,
+  formatMoney,
+  freshTriggerCount,
+  parseStallDays,
+  rankAccounts,
+  stageTotals,
+  type AccountTrigger,
   isAccountStage,
   newFindings,
   parseAccountPatch,
@@ -87,6 +94,9 @@ test("the CSV has a header, one row per account and the domain split out", () =>
     {
       company: "Stripe · stripe.com",
       stage: "meeting",
+      dealValue: 25000,
+      nextStep: "Send proposal",
+      health: "on_track",
       owner: "Nick",
       notes: "=cmd",
       latestReportAt: "2026-11-10T15:00:00Z",
@@ -98,6 +108,59 @@ test("the CSV has a header, one row per account and the domain split out", () =>
   assert.ok(csv.startsWith("﻿"));
   const lines = csv.slice(1).trimEnd().split("\r\n");
   assert.equal(lines.length, 2);
-  assert.equal(lines[0], "Company,Domain,Stage,Owner,Notes,Latest report,Report link,Added,Updated");
-  assert.equal(lines[1], "Stripe,stripe.com,Meeting,Nick,'=cmd,2026-11-10,https://www.metisanalytic.com/app?run=abc,2026-11-01,2026-11-09");
+  assert.equal(lines[0], "Company,Domain,Stage,Deal value,Health,Owner,Next step,Notes,Latest report,Report link,Added,Updated");
+  assert.equal(lines[1], "Stripe,stripe.com,Meeting,25000.00,On track,Nick,Send proposal,'=cmd,2026-11-10,https://www.metisanalytic.com/app?run=abc,2026-11-01,2026-11-09");
+});
+
+const NOW = new Date("2026-11-10T12:00:00Z");
+const daysAgo = (n: number) => new Date(NOW.getTime() - n * 86_400_000).toISOString();
+const trig = (atRisk: boolean, days: number, title = "x"): AccountTrigger => ({ kind: "layoffs", atRisk, title, url: "https://n/1", eventDate: null, detectedAt: daysAgo(days) });
+
+test("deal value and next step are validated", () => {
+  assert.deepEqual(parseAccountPatch({ dealValue: "$25,000.555", nextStep: "  Send proposal " }), { ok: true, patch: { dealValue: 25000.56, nextStep: "Send proposal" } });
+  assert.deepEqual(parseAccountPatch({ dealValue: "", nextStep: "" }), { ok: true, patch: { dealValue: null, nextStep: null } });
+  assert.equal(parseAccountPatch({ dealValue: -1 }).ok, false);
+  assert.equal(parseAccountPatch({ dealValue: "lots" }).ok, false);
+  assert.equal(parseAccountPatch({ nextStep: "a".repeat(301) }).ok, false);
+});
+
+test("health: at risk beats stalled; won and lost are closed", () => {
+  const base = { stage: "proposal" as const, stageChangedAt: daysAgo(40), triggers: [] as AccountTrigger[] };
+  assert.equal(dealHealth(base, 14, NOW).health, "stalled");
+  assert.match(dealHealth(base, 14, NOW).reasons[0], /No stage change in 40 days/);
+  assert.equal(dealHealth({ ...base, stageChangedAt: daysAgo(3) }, 14, NOW).health, "on_track");
+  assert.deepEqual(dealHealth({ ...base, triggers: [trig(true, 5, "Acme lays off 200")] }, 14, NOW), { health: "at_risk", reasons: ["Acme lays off 200"] });
+  assert.equal(dealHealth({ ...base, stageChangedAt: daysAgo(1), triggers: [trig(true, 45)] }, 14, NOW).health, "on_track");
+  assert.equal(dealHealth({ ...base, triggers: [trig(false, 1)] , stageChangedAt: daysAgo(1) }, 14, NOW).health, "on_track");
+  assert.equal(dealHealth({ ...base, stage: "won", triggers: [trig(true, 1)] }, 14, NOW).health, "closed");
+});
+
+test("fresh triggers are the last 14 days", () => {
+  assert.equal(freshTriggerCount([trig(false, 1), trig(true, 13), trig(false, 20)], NOW), 2);
+});
+
+test("ranking: fresh triggers first, then at risk, then stalled", () => {
+  const ranked = rankAccounts([
+    { id: "quiet", health: "on_track" as const, freshTriggers: 0, updatedAt: daysAgo(1) },
+    { id: "stalled", health: "stalled" as const, freshTriggers: 0, updatedAt: daysAgo(2) },
+    { id: "busy", health: "on_track" as const, freshTriggers: 3, updatedAt: daysAgo(9) },
+    { id: "risk", health: "at_risk" as const, freshTriggers: 0, updatedAt: daysAgo(3) },
+  ]);
+  assert.deepEqual(ranked.map((a) => a.id), ["busy", "risk", "stalled", "quiet"]);
+});
+
+test("stage totals add deal values per stage in pipeline order", () => {
+  const totals = stageTotals([
+    { stage: "meeting", dealValue: 10000 }, { stage: "meeting", dealValue: null }, { stage: "won", dealValue: 5000.5 },
+  ]);
+  assert.deepEqual(totals.map((t) => t.stage), ["researching", "contacted", "meeting", "proposal", "won", "lost"]);
+  assert.deepEqual(totals.find((t) => t.stage === "meeting"), { stage: "meeting", count: 2, total: 10000 });
+  assert.equal(totals.find((t) => t.stage === "won")!.total, 5000.5);
+});
+
+test("stall days and money formatting", () => {
+  assert.equal(parseStallDays("21"), 21);
+  for (const bad of [0, 366, 2.5, "x", null]) assert.equal(parseStallDays(bad), null);
+  assert.equal(formatMoney(25000), "$25,000");
+  assert.equal(formatMoney(null), "—");
 });

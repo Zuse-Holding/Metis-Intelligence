@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { parseCompany } from "../../../lib/accounts";
 import { createAccount, listAccounts, requireAccountsAccess } from "../../../lib/supabase/accounts";
 
-/** The signed-in user's saved accounts, with each one's latest report. */
+/** The signed-in user's saved accounts (ranked, with triggers and health) and their stall setting. */
 export async function GET() {
   const access = await requireAccountsAccess();
   if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status });

@@ -1,7 +1,19 @@
 import { createServerSupabaseClient, createServiceClient } from "./server";
 import { getAgentSecret } from "../agent-secret";
 import { trackEvent } from "../analytics";
-import { newFindings, type AccountPatch, type AccountStage, type ChangedFinding, type FindingLike } from "../accounts";
+import {
+  DEFAULT_STALL_DAYS,
+  dealHealth,
+  freshTriggerCount,
+  newFindings,
+  rankAccounts,
+  type AccountPatch,
+  type AccountStage,
+  type AccountTrigger,
+  type ChangedFinding,
+  type FindingLike,
+  type Health,
+} from "../accounts";
 
 /**
  * Account pipeline data layer. Reads go through the signed-in user's client
@@ -12,6 +24,10 @@ import { newFindings, type AccountPatch, type AccountStage, type ChangedFinding,
 
 /** Per-user cap, so one account can't fill the table. Far above real use. */
 export const MAX_ACCOUNTS_PER_USER = 500;
+/** Triggers shown per account (newest first). */
+const TRIGGERS_PER_ACCOUNT = 10;
+/** How far back triggers are loaded. */
+const TRIGGER_LOOKBACK_DAYS = 60;
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export function isUuid(value: string): boolean {
@@ -24,11 +40,18 @@ export interface Account {
   stage: AccountStage;
   owner: string | null;
   notes: string | null;
+  dealValue: number | null;
+  nextStep: string | null;
+  stageChangedAt: string;
   createdAt: string;
   updatedAt: string;
   latestRun: { id: string; generatedAt: string } | null;
   /** Completed company reports for this account; "what changed" needs 2. */
   runCount: number;
+  triggers: AccountTrigger[];
+  freshTriggers: number;
+  health: Health;
+  healthReasons: string[];
 }
 
 export type AccessResult =
@@ -73,6 +96,9 @@ interface AccountRow {
   stage: AccountStage;
   owner: string | null;
   notes: string | null;
+  deal_value: string | number | null;
+  next_step: string | null;
+  stage_changed_at: string;
   created_at: string;
   updated_at: string;
 }
@@ -99,17 +125,41 @@ async function companyRuns(userId: string): Promise<RunRow[]> {
   return (data ?? []) as RunRow[];
 }
 
-export async function listAccounts(userId: string): Promise<Account[]> {
+/** Days without a stage change before a deal shows as stalled. */
+export async function getStallDays(userId: string): Promise<number> {
   const supabase = await createServerSupabaseClient();
-  const [{ data, error }, runs] = await Promise.all([
+  const { data } = await supabase.from("pipeline_settings").select("stall_days").eq("user_id", userId).maybeSingle();
+  return (data?.stall_days as number | undefined) ?? DEFAULT_STALL_DAYS;
+}
+
+export async function setStallDays(userId: string, stallDays: number): Promise<void> {
+  const supabase = await createServerSupabaseClient();
+  const { error } = await supabase
+    .from("pipeline_settings")
+    .upsert({ user_id: userId, stall_days: stallDays, updated_at: new Date().toISOString() }, { onConflict: "user_id" });
+  if (error) throw error;
+}
+
+/** Accounts with their latest report, triggers and health, ranked: work the top first. */
+export async function listAccounts(userId: string, now = new Date()): Promise<{ accounts: Account[]; stallDays: number }> {
+  const supabase = await createServerSupabaseClient();
+  const since = new Date(now.getTime() - TRIGGER_LOOKBACK_DAYS * 86_400_000).toISOString();
+  const [{ data, error }, runs, stallDays, { data: triggerRows, error: tErr }] = await Promise.all([
     supabase
       .from("accounts")
-      .select("id, company, stage, owner, notes, created_at, updated_at")
-      .eq("user_id", userId)
-      .order("updated_at", { ascending: false }),
+      .select("id, company, stage, owner, notes, deal_value, next_step, stage_changed_at, created_at, updated_at")
+      .eq("user_id", userId),
     companyRuns(userId),
+    getStallDays(userId),
+    supabase
+      .from("account_triggers")
+      .select("account_id, kind, at_risk, title, url, event_date, detected_at")
+      .eq("user_id", userId)
+      .gte("detected_at", since)
+      .order("detected_at", { ascending: false }),
   ]);
   if (error) throw error;
+  if (tErr) throw tErr;
 
   // Runs arrive newest-first, so the first one per subject is the latest.
   const bySubject = new Map<string, { latest: RunRow; count: number }>();
@@ -120,25 +170,49 @@ export async function listAccounts(userId: string): Promise<Account[]> {
     else bySubject.set(key, { latest: run, count: 1 });
   }
 
-  return ((data ?? []) as AccountRow[]).map((row) => {
+  const triggersByAccount = new Map<string, AccountTrigger[]>();
+  for (const t of triggerRows ?? []) {
+    const list = triggersByAccount.get(t.account_id as string) ?? [];
+    if (list.length < TRIGGERS_PER_ACCOUNT) {
+      list.push({
+        kind: t.kind as string, atRisk: !!t.at_risk, title: t.title as string, url: t.url as string,
+        eventDate: (t.event_date as string | null) ?? null, detectedAt: t.detected_at as string,
+      });
+    }
+    triggersByAccount.set(t.account_id as string, list);
+  }
+
+  const accounts = ((data ?? []) as AccountRow[]).map((row): Account => {
     const match = bySubject.get(subjectKey(row.company));
+    const triggers = triggersByAccount.get(row.id) ?? [];
+    const { health, reasons } = dealHealth({ stage: row.stage, stageChangedAt: row.stage_changed_at, triggers }, stallDays, now);
     return {
       id: row.id,
       company: row.company,
       stage: row.stage,
       owner: row.owner,
       notes: row.notes,
+      dealValue: row.deal_value === null ? null : Number(row.deal_value),
+      nextStep: row.next_step,
+      stageChangedAt: row.stage_changed_at,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       latestRun: match ? { id: match.latest.id, generatedAt: match.latest.generated_at } : null,
       runCount: match?.count ?? 0,
+      triggers,
+      freshTriggers: freshTriggerCount(triggers, now),
+      health,
+      healthReasons: reasons,
     };
   });
+  return { accounts: rankAccounts(accounts), stallDays };
 }
 
 export type CreateResult =
   | { ok: true; id: string; existed: boolean }
   | { ok: false; status: 409; error: string };
+
+const likeExact = (s: string) => s.replace(/[\\%_]/g, (c) => `\\${c}`);
 
 /** Saves a company. Saving one that's already on the list returns it. */
 export async function createAccount(userId: string, company: string): Promise<CreateResult> {
@@ -148,7 +222,7 @@ export async function createAccount(userId: string, company: string): Promise<Cr
     .from("accounts")
     .select("id")
     .eq("user_id", userId)
-    .ilike("company", company.replace(/[\\%_]/g, (c: string) => `\\${c}`))
+    .ilike("company", likeExact(company))
     .maybeSingle();
   if (existing) return { ok: true, id: existing.id as string, existed: true };
 
@@ -172,7 +246,7 @@ export async function createAccount(userId: string, company: string): Promise<Cr
         .from("accounts")
         .select("id")
         .eq("user_id", userId)
-        .ilike("company", company.replace(/[\\%_]/g, (c: string) => `\\${c}`))
+        .ilike("company", likeExact(company))
         .maybeSingle();
       if (row) return { ok: true, id: row.id as string, existed: true };
     }
@@ -182,12 +256,25 @@ export async function createAccount(userId: string, company: string): Promise<Cr
   return { ok: true, id: data.id as string, existed: false };
 }
 
-/** False when the account doesn't exist or isn't the caller's. */
+/** False when the account doesn't exist or isn't the caller's. A stage
+ *  change also resets the "stalled" clock. */
 export async function updateAccount(userId: string, id: string, patch: AccountPatch): Promise<boolean> {
   const service = createServiceClient();
+  const now = new Date().toISOString();
+  const row: Record<string, unknown> = { updated_at: now };
+  if (patch.owner !== undefined) row.owner = patch.owner;
+  if (patch.notes !== undefined) row.notes = patch.notes;
+  if (patch.dealValue !== undefined) row.deal_value = patch.dealValue;
+  if (patch.nextStep !== undefined) row.next_step = patch.nextStep;
+  if (patch.stage !== undefined) {
+    const { data: current } = await service.from("accounts").select("stage").eq("id", id).eq("user_id", userId).maybeSingle();
+    if (!current) return false;
+    row.stage = patch.stage;
+    if (current.stage !== patch.stage) row.stage_changed_at = now;
+  }
   const { data, error } = await service
     .from("accounts")
-    .update({ ...patch, updated_at: new Date().toISOString() })
+    .update(row)
     .eq("id", id)
     .eq("user_id", userId)
     .select("id");
