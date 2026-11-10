@@ -825,3 +825,31 @@ REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON research_runs FR
 REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON deep_dives    FROM anon, authenticated;
 REVOKE ALL ON research_runs FROM anon;
 REVOKE ALL ON deep_dives    FROM anon;
+
+-- ============================================================
+-- What the user sells (Sales tab, Nov 2026)
+-- One row per user for now: the outcome they sell, the vendors they
+-- replace (matched against the report's tech stack) and who they sell to.
+-- Plain user data with no plan gate, so the owner reads and writes it
+-- directly under RLS. user_id is unique today; drop that to allow several
+-- offers per user later.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS seller_offers (
+  id                UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id           UUID        NOT NULL UNIQUE REFERENCES auth.users(id) ON DELETE CASCADE,
+  offering          TEXT        NOT NULL CHECK (char_length(offering) BETWEEN 1 AND 300),
+  competitors       TEXT[]      NOT NULL DEFAULT '{}' CHECK (cardinality(competitors) <= 20),
+  target_customers  TEXT        NOT NULL DEFAULT '' CHECK (char_length(target_customers) <= 300),
+  updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE seller_offers ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users manage own seller offer" ON seller_offers;
+CREATE POLICY "Users manage own seller offer"
+  ON seller_offers FOR ALL
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+
+REVOKE ALL ON seller_offers FROM anon;

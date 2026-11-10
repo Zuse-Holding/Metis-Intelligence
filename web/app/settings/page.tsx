@@ -7,6 +7,8 @@ import { quotaText } from "../../metis-ui";
 import Sidebar from "../../components/Sidebar";
 import Topbar from "../../components/Topbar";
 import { Skeleton } from "../../components/Skeleton";
+import SellerOfferForm from "../../components/SellerOfferForm";
+import type { SellerOffer } from "../../lib/sales";
 import styles from "./page.module.css";
 
 // Internal accounts show "Charon" here (Charon Protocol) rather than the
@@ -253,6 +255,11 @@ export default function Settings() {
             {nameError && <div className={styles.fieldError}>{nameError}</div>}
           </div>
 
+          <div className={styles.group}>
+            <div className={styles.groupLabel}>WHAT YOU SELL</div>
+            <SellerOfferSettings />
+          </div>
+
           {SYSTEM_INFO.map((group) => (
             <div key={group.section} className={styles.group}>
               <div className={styles.groupLabel}>{group.section}</div>
@@ -410,5 +417,26 @@ export default function Settings() {
         </div>
       </main>
     </div>
+  );
+}
+
+/** Loads the saved offer, then shows the form. Used by the Sales tab too. */
+function SellerOfferSettings() {
+  const [offer, setOffer] = useState<SellerOffer | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => {
+    fetch("/api/seller-offer", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : { offer: null }))
+      .then((d) => setOffer(d.offer ?? null))
+      .catch(() => setOffer(null))
+      .finally(() => setLoaded(true));
+  }, []);
+  if (!loaded) return <Skeleton width={320} height={12} />;
+  return (
+    <SellerOfferForm
+      offer={offer}
+      onSaved={setOffer}
+      intro="Used on every company report's Sales tab to flag accounts that run a competitor you replace."
+    />
   );
 }
