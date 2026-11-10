@@ -30,6 +30,7 @@ export interface SalesBundle {
   courtCases?: { caption: string; filed?: string; url: string; routine?: boolean; caseType?: string }[];
   federalSpending?: { awardingAgency?: string; amount?: string; date?: string; awardType?: string; description?: string }[];
   sources?: { url: string; title?: string; usedFor: string[] }[];
+  competitors?: { name: string; url?: string }[];
   techStack?: {
     domain: string;
     items: { vendor: string; category: string; confidence: string; evidence: string; sourceName: string; sourceUrl: string }[];

@@ -555,7 +555,7 @@ function Dashboard() {
                           <ResearchSkeleton subject={selected.subject} type={selected.type} />
                         ) : (
                           <ErrorBoundary>
-                            <SalesTab subject={selected.subject} bundle={selected.bundle} />
+                            <SalesTab subject={selected.subject} bundle={selected.bundle} runId={selected.id} />
                           </ErrorBoundary>
                         )
                       )}

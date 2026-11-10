@@ -25,7 +25,68 @@ export interface CompanyProfileRecord {
   headquarters?: string | null;
   ownership?: string | null;
   ownership_source?: string | null;
+  /** How often each peer was found, across runs (ABM peer-set fix). */
+  peer_votes?: PeerVotes | null;
   updated_at?: string;
+}
+
+export interface PeerVote { name: string; url: string; count: number; lastSeen: string }
+/** Keyed by the peer's normalized name. */
+export type PeerVotes = Record<string, PeerVote>;
+
+/** Peers found at least this often are kept even when a run misses them. */
+export const STABLE_PEER_VOTES = 2;
+export const MAX_PEERS = 8;
+/** A peer no run has found in this long is forgotten. */
+const PEER_VOTE_TTL_DAYS = 180;
+
+export const peerKey = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\b(inc|llc|corp|corporation|co|company|ltd)\b/g, "").replace(/\s+/g, " ").trim();
+
+/**
+ * Peers ranked by how many runs found them (ABM brief: Graybar's peer set
+ * changed from run to run). Peers found in two or more runs come first and
+ * are kept even when this run missed them (marked carried, cited to the
+ * page that named them before); this run's other finds fill what's left.
+ * Pure: returns the new list and doesn't touch the bundle.
+ */
+export function stablePeers(current: CompetitorEntry[], votes: PeerVotes | null | undefined): CompetitorEntry[] {
+  const fresh = current.filter((c) => !c.carried && c.url);
+  const freshByKey = new Map(fresh.map((c) => [peerKey(c.name), c]));
+  const stable = Object.entries(votes ?? {})
+    .map(([key, v]) => ({ key, v, count: v.count + (freshByKey.has(key) ? 1 : 0) }))
+    .filter((e) => e.count >= STABLE_PEER_VOTES)
+    .sort((a, b) => b.count - a.count || a.v.name.localeCompare(b.v.name));
+  const out: CompetitorEntry[] = [];
+  const used = new Set<string>();
+  for (const e of stable) {
+    if (out.length >= MAX_PEERS) break;
+    const now = freshByKey.get(e.key);
+    out.push(now ?? { name: e.v.name, url: e.v.url, carried: true });
+    used.add(e.key);
+  }
+  for (const c of current) {
+    if (out.length >= MAX_PEERS) break;
+    const key = peerKey(c.name);
+    if (used.has(key)) continue;
+    out.push(c);
+    used.add(key);
+  }
+  return out;
+}
+
+/** This run's peers counted into the saved tally. Only peers this run found itself count. */
+export function updatePeerVotes(prior: PeerVotes | null | undefined, competitors: CompetitorEntry[], now = new Date()): PeerVotes {
+  const cutoff = now.getTime() - PEER_VOTE_TTL_DAYS * 86_400_000;
+  const votes: PeerVotes = {};
+  for (const [k, v] of Object.entries(prior ?? {})) if (Date.parse(v.lastSeen) >= cutoff) votes[k] = { ...v };
+  for (const c of competitors) {
+    if (c.carried || !c.url) continue;
+    const key = peerKey(c.name);
+    if (!key) continue;
+    const v = votes[key];
+    votes[key] = v ? { name: v.name, url: c.url, count: v.count + 1, lastSeen: now.toISOString() } : { name: c.name, url: c.url, count: 1, lastSeen: now.toISOString() };
+  }
+  return votes;
 }
 
 let client: SupabaseClient | null | undefined;
@@ -77,6 +138,11 @@ export function applyProfile(bundle: ResearchBundle, p: CompanyProfileRecord | u
   }
   if (!c.headquarters && p.headquarters) { c.headquarters = p.headquarters; filled.push(`headquarters ${p.headquarters}`); }
   if (!c.legalName && p.legal_name) { c.legalName = p.legal_name; filled.push("legal name"); }
+  if (p.peer_votes && Object.keys(p.peer_votes).length) {
+    const before = bundle.competitors.map((c) => c.name).join("|");
+    bundle.competitors = stablePeers(bundle.competitors, p.peer_votes);
+    if (bundle.competitors.map((c) => c.name).join("|") !== before) filled.push("peers");
+  }
   if (!bundle.ownership && p.ownership && p.ownership_source) {
     bundle.ownership = p.ownership;
     if (!bundle.sources.some((s) => s.url === p.ownership_source)) {
@@ -104,9 +170,10 @@ export function profileFrom(bundle: ResearchBundle, domain: string, prior?: Comp
     headquarters: c.headquarters && !c.headquartersUnverified ? c.headquarters : prior?.headquarters ?? null,
     ownership: bundle.ownership && ownershipSource ? bundle.ownership : prior?.ownership ?? null,
     ownership_source: bundle.ownership && ownershipSource ? ownershipSource : prior?.ownership_source ?? null,
+    peer_votes: updatePeerVotes(prior?.peer_votes, bundle.competitors),
     updated_at: new Date().toISOString(),
   };
-  return rec.founded || rec.headquarters || rec.ownership || rec.legal_name ? rec : undefined;
+  return rec.founded || rec.headquarters || rec.ownership || rec.legal_name || Object.keys(rec.peer_votes ?? {}).length ? rec : undefined;
 }
 
 export async function saveProfile(rec: CompanyProfileRecord | undefined): Promise<void> {
