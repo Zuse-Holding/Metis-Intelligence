@@ -231,6 +231,52 @@ function PostureSection({ content }: { content: string[] }) {
   );
 }
 
+// Tech stack (ABM brief §2): the "Tech Stack" section that
+// src/agents/tech-stack-agent/render.ts writes, one tool per line:
+//   - [confirmed] CRM | Salesforce | SPF: v=spf1 include:_spf.salesforce.com ~all | [Public DNS (TXT)](https://...)
+// Change both files together.
+const TECH_TITLE = "Tech Stack";
+const TECH_LINE = /^\[(confirmed|likely)\] (.+?) \| (.+?) \| (.+?) \| \[(.+?)\]\((.+?)\)$/;
+
+interface TechRow { confidence: string; category: string; vendor: string; evidence: string; sourceName: string; sourceUrl: string }
+
+function TechStackSection({ content }: { content: string[] }) {
+  const summary = (content.find((l) => l.trim().startsWith("_")) ?? "").trim().replace(/^_|_$/g, "");
+  const groups = new Map<string, TechRow[]>();
+  for (const line of content) {
+    const m = line.trim().replace(/^- /, "").match(TECH_LINE);
+    if (!m) continue;
+    const row = { confidence: m[1], category: m[2], vendor: m[3], evidence: m[4], sourceName: m[5], sourceUrl: m[6] };
+    groups.set(row.category, [...(groups.get(row.category) ?? []), row]);
+  }
+  return (
+    <div className={styles.provenance}>
+      {summary && <p className={styles.provSummary}>{summary}</p>}
+      {groups.size > 0 && (
+        <div className={styles.postureList}>
+          {[...groups.entries()].map(([category, rows]) => (
+            <div key={category} className={styles.postureRow}>
+              <span className={styles.postureLabel}>{category}</span>
+              <span className={styles.postureDetail} style={{ gridColumn: "2 / -1" }}>
+                {rows.map((r, i) => (
+                  <span key={i} title={r.evidence}>
+                    {i > 0 && " · "}
+                    {r.vendor}{" "}
+                    <span className={`${styles.fBadge} ${r.confidence === "confirmed" ? styles.fConfirmed : styles.fSingle}`}>
+                      {r.confidence === "confirmed" ? "✓ confirmed" : "likely"}
+                    </span>{" "}
+                    <a href={r.sourceUrl} target="_blank" rel="noopener noreferrer" className={styles.postureSource}>{r.evidence} ↗</a>
+                  </span>
+                ))}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Related entities (Feature 4): the "Related Entities" section that
 // src/agents/related-entities-agent/render.ts writes:
 //   - node n0 | company | ACME LLC | NY 123 | 0 | https://...
@@ -595,6 +641,7 @@ function renderSection(section: Section, onRetry?: () => void) {
   if (title === PROVENANCE_TITLE) return <ProvenanceSection content={content} />;
   if (title === COVERAGE_TITLE) return <CoverageSection content={content} onRetry={onRetry} />;
   if (title === POSTURE_TITLE) return <PostureSection content={content} />;
+  if (title === TECH_TITLE) return <TechStackSection content={content} />;
   if (title === RELATED_TITLE) return <RelatedSection content={content} />;
 
   if (isPlaceholder(content)) {

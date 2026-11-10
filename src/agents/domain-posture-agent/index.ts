@@ -1,5 +1,6 @@
 import tls from "node:tls";
 import type { Source } from "../../types/research.js";
+import { mailVendors } from "../tech-stack-agent/vendors.js";
 
 /**
  * Passive domain posture check (Feature 5). For a target's website domain,
@@ -70,40 +71,10 @@ const days = (iso: string | undefined, now: Date) => (iso ? Math.floor((Date.par
 const dateOnly = (iso: string | undefined) => (iso ? iso.slice(0, 10) : "unknown");
 
 // MX hosts, SPF includes and verification TXT records -> the service
-// behind them. Only services a record names outright; nothing inferred.
-const SYSTEM_PATTERNS: [RegExp, string][] = [
-  [/google\.com|googlemail\.com|_spf\.google|google-site-verification/i, "Google Workspace"],
-  [/protection\.outlook\.com|spf\.protection\.outlook|^ms=ms\d+/i, "Microsoft 365"],
-  [/pphosted\.com|ppe-hosted\.com/i, "Proofpoint"],
-  [/mimecast/i, "Mimecast"],
-  [/barracudanetworks/i, "Barracuda"],
-  [/oracleemaildelivery|oraclecloud|oracle-cloud/i, "Oracle Cloud"],
-  [/hubspotemail|hubspot/i, "HubSpot"],
-  [/_spf\.salesforce\.com|salesforce|pardot/i, "Salesforce"],
-  [/paubox/i, "Paubox (HIPAA email)"],
-  [/sendgrid/i, "SendGrid"],
-  [/mailgun/i, "Mailgun"],
-  [/amazonses/i, "Amazon SES"],
-  [/mcsv\.net|mailchimp|mandrillapp/i, "Mailchimp"],
-  [/zendesk/i, "Zendesk"],
-  [/freshdesk|freshworks/i, "Freshworks"],
-  [/zoho/i, "Zoho"],
-  [/atlassian/i, "Atlassian"],
-  [/docusign/i, "DocuSign"],
-  [/bidtracer/i, "BidTracer"],
-  [/intuit|quickbooks/i, "QuickBooks"],
-  [/stripe-verification|stripe/i, "Stripe"],
-  [/apple-domain-verification/i, "Apple Business"],
-  [/facebook-domain-verification/i, "Meta Business"],
-];
-
+// behind them, from the shared vendor table (tech-stack-agent/vendors.ts).
+// Only services a record names outright; nothing inferred.
 export function systemsInUse(mx: string[] | undefined, txt: string[] | undefined): string[] {
-  const records = [...(mx ?? []), ...(txt ?? []).filter((t) => /^v=spf1|verification|^ms=/i.test(t))];
-  const found: string[] = [];
-  for (const [re, name] of SYSTEM_PATTERNS) {
-    if (records.some((r) => re.test(r)) && !found.includes(name)) found.push(name);
-  }
-  return found;
+  return mailVendors(mx, txt);
 }
 
 // Mail hosts that serve many companies: a domain under one of these says

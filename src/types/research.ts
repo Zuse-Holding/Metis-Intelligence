@@ -1,6 +1,7 @@
 import type { ProvenanceRecord } from "../lib/provenance/build.js";
 import type { CoverageEntry } from "../lib/coverage/recorder.js";
 import type { DomainPosture } from "../agents/domain-posture-agent/index.js";
+import type { TechStack } from "../agents/tech-stack-agent/index.js";
 import type { RelatedGraph } from "../lib/expansion/engine.js";
 import type { ClosureEvidence } from "../lib/closure.js";
 import type { CaseRecord, FddFigures, NpiRecord } from "../agents/public-filings-agent/index.js";
@@ -431,6 +432,10 @@ export interface ResearchBundle {
   /** Passive domain check of the company website (Feature 5). Present
    *  only when FEATURE_DOMAIN_POSTURE was on and a website was found. */
   domainPosture?: DomainPosture;
+  /** Tools the company runs, from public DNS and its homepage (ABM brief
+   *  §2, phase 1). Present only when FEATURE_TECH_STACK was on and a
+   *  website was found. */
+  techStack?: TechStack;
   /** Related-entities graph from public filings (Feature 4). Present only
    *  when FEATURE_RELATED_ENTITIES was on. */
   relatedEntities?: RelatedGraph;

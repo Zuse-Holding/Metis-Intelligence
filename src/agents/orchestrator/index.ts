@@ -17,6 +17,7 @@ import { WaybackAgent } from "../wayback-agent/index.js";
 import { ProPublicaNonprofitAgent } from "../propublica-nonprofit-agent/index.js";
 import { LittleSisAgent, LittleSisRelationshipEntry } from "../littlesis-agent/index.js";
 import { DomainPostureAgent } from "../domain-posture-agent/index.js";
+import { TechStackAgent } from "../tech-stack-agent/index.js";
 import { RelatedEntitiesAgent } from "../related-entities-agent/index.js";
 import { PublicFilingsAgent, caseRole, fundNames, fundTargets, isHealthcare, nameVariants, rankCases, type CaseRecord } from "../public-filings-agent/index.js";
 
@@ -259,6 +260,8 @@ export class ResearchOrchestrator {
     const domain = siteHost ? siteOf(siteHost) : undefined;
     const checkDomain = isEnabled("domain_posture");
     if (checkDomain && !domain) cov.skip("domain", "No company website was found to check.");
+    const checkStack = isEnabled("tech_stack");
+    if (checkStack && !domain) cov.skip("techstack", "No company website was found to check.");
 
     // Related entities (Feature 4): public filings, every plan. Anything
     // on the self-exclusion list (Feature 6) is never followed.
@@ -301,7 +304,7 @@ export class ResearchOrchestrator {
         : Promise.resolve({ funding: [], sources: [] }),
     ]);
 
-    const [sanctionsResult, waybackResult, nonprofitResult, littleSisResult, postureResult, relatedResult] =
+    const [sanctionsResult, waybackResult, nonprofitResult, littleSisResult, postureResult, stackResult, relatedResult] =
       await Promise.all([
         proAccess
           ? cov.run("sanctions", () => this.sanctionsAgent.run(companyName), { matches: [], sources: [], unavailable: true }, (r) => r.matches.length)
@@ -320,6 +323,9 @@ export class ResearchOrchestrator {
         checkDomain && domain
           ? cov.run("domain", () => new DomainPostureAgent().run(domain, siteResult.company.emailDomain), { sources: [] }, (r) => r.posture?.checks.length ?? 0, domain)
           : Promise.resolve({ posture: undefined, sources: [] }),
+        checkStack && domain
+          ? cov.run("techstack", () => new TechStackAgent().run(domain, website), { sources: [] }, (r) => r.stack?.items.length ?? 0, domain)
+          : Promise.resolve({ stack: undefined, sources: [] }),
         related,
       ]);
 
@@ -343,6 +349,7 @@ export class ResearchOrchestrator {
       ...nonprofitResult.sources,
       ...littleSisResult.sources,
       ...postureResult.sources,
+      ...stackResult.sources,
       ...relatedResult.sources,
     ];
 
@@ -369,6 +376,7 @@ export class ResearchOrchestrator {
       // Only this organization's own LittleSis record (launch fix 40).
       powerMapConnections: orgMatches(littleSisResult.matches, companyName),
       domainPosture: postureResult.posture,
+      techStack: stackResult.stack,
       relatedEntities: relatedResult.graph,
       // Most material first (launch fix 21). Government actions from agency
       // sites join them (launch fix 62).
