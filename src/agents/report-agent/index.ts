@@ -2,6 +2,7 @@ import { REPORT_DISCLAIMER } from "../../lib/disclaimer.js";
 import { pushProvenanceSection } from "../../lib/provenance/render.js";
 import { pushCoverageSection } from "../../lib/coverage/render.js";
 import { pushPostureSection } from "../domain-posture-agent/render.js";
+import { pushTechStackSection } from "../tech-stack-agent/render.js";
 import { pushRelatedSection } from "../related-entities-agent/render.js";
 import { CreatorResearchBundle, PersonResearchBundle, PoliticalResearchBundle, ProductResearchBundle, ResearchBundle, Source } from "../../types/research.js";
 import type { Form4Entry } from "../../types/research.js";
@@ -298,6 +299,7 @@ export class ReportAgent {
     this.pushPublicRecordsSection(lines, bundle);
     this.pushCourtRecordsSection(lines, bundle);
     pushRelatedSection(lines, bundle.relatedEntities);
+    pushTechStackSection(lines, bundle.techStack);
     pushPostureSection(lines, bundle.domainPosture);
     pushProvenanceSection(lines, bundle.provenance);
 
