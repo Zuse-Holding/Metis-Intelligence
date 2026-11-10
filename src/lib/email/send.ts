@@ -24,6 +24,8 @@ interface SendEmailOptions {
   subject: string;
   text: string;
   replyTo?: string;
+  /** Extra headers, e.g. List-Unsubscribe (see ./unsubscribe.ts). */
+  headers?: Record<string, string>;
   /** Keep the address out of logs (e.g. self-exclusion confirmations). */
   redactRecipient?: boolean;
 }
@@ -42,6 +44,7 @@ export async function sendEmail(opts: SendEmailOptions): Promise<{ sent: boolean
       subject: opts.subject,
       text: opts.text,
       replyTo: opts.replyTo,
+      headers: opts.headers,
     });
     if (error) {
       console.error(`[email] send failed for "${opts.subject}" to ${who}:`, error);

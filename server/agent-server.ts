@@ -25,6 +25,7 @@ import { findEasterEgg } from "../src/easter-eggs/index.js";
 import { saveEntityExtraction, saveLittleSisRelationships } from "../src/database/knowledge-graph.js";
 import { recordsFromBundle } from "../src/lib/entities/records.js";
 import { notAvailable, registerExclusionRoutes, searchBlocked } from "./exclusion-routes.js";
+import { signUnsubscribeToken, unsubscribeHeaders, unsubscribePageUrl, verifyUnsubscribeToken } from "../src/lib/email/unsubscribe.js";
 import { upsertStatewideExecutives } from "../src/database/statewide-executives.js";
 import { DirectFetchProvider, SerperSearchProvider } from "../src/lib/providers.js";
 import { isLocationOnly, parseCompanyQuery, parsePersonQuery } from "../src/lib/nlp.js";
@@ -549,9 +550,10 @@ async function maybeSendCapReachedEmail(userId: string, capLabel: string) {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("display_name, last_cap_reached_email_at")
+    .select("display_name, last_cap_reached_email_at, email_opt_out_at")
     .eq("id", userId)
     .single();
+  if (profile?.email_opt_out_at) return;
   if (profile?.last_cap_reached_email_at) {
     const elapsed = Date.now() - new Date(profile.last_cap_reached_email_at).getTime();
     if (elapsed < CAP_EMAIL_COOLDOWN_MS) return;
@@ -561,8 +563,9 @@ async function maybeSendCapReachedEmail(userId: string, capLabel: string) {
   if (error || !userData?.user?.email) return;
 
   const firstName = profile?.display_name?.split(" ")[0] || "";
-  const { subject, text } = capReachedEmail(firstName, capLabel);
-  const { sent } = await sendEmail({ to: userData.user.email, subject, text });
+  const token = signUnsubscribeToken(userId);
+  const { subject, text } = capReachedEmail(firstName, capLabel, unsubscribePageUrl(token));
+  const { sent } = await sendEmail({ to: userData.user.email, subject, text, headers: unsubscribeHeaders(token) });
   if (sent) {
     await supabase.from("profiles").update({ last_cap_reached_email_at: new Date().toISOString() }).eq("id", userId);
   }
@@ -1923,6 +1926,30 @@ app.post("/admin/statewide-executives/refresh", async (req, res) => {
 app.get("/health", (_, res) => res.json({ ok: true, build: BUILD_ID, timestamp: new Date().toISOString() }));
 
 registerExclusionRoutes(app, { supabase, authCheck, getUserTier, checkHourlyBucket, frontendUrl: ALLOWED_ORIGIN });
+
+// Email unsubscribe (CAN-SPAM). The token is signed (src/lib/email/unsubscribe.ts),
+// so no session is needed; the web app's /unsubscribe page and one-click
+// /api/unsubscribe route both forward here. Idempotent: the first opt-out time stays.
+app.post("/email/unsubscribe", async (req, res) => {
+  if (!authCheck(req, res)) return;
+  const token = req.body?.token;
+  const userId = typeof token === "string" ? verifyUnsubscribeToken(token) : null;
+  if (!userId) {
+    res.status(400).json({ ok: false });
+    return;
+  }
+  const { error } = await supabase
+    .from("profiles")
+    .update({ email_opt_out_at: new Date().toISOString() })
+    .eq("id", userId)
+    .is("email_opt_out_at", null);
+  if (error) {
+    console.error("[unsubscribe] update failed:", error.message);
+    res.status(500).json({ ok: false });
+    return;
+  }
+  res.json({ ok: true });
+});
 
 app.listen(PORT, () => {
   console.log(`SELINE Agent Server running on port ${PORT}`);

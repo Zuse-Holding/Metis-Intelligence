@@ -21,6 +21,7 @@ import { pathToFileURL } from "node:url";
 import { createClient } from "@supabase/supabase-js";
 import { day7Email } from "./src/lib/email/copy.js";
 import { sendEmail } from "./src/lib/email/send.js";
+import { signUnsubscribeToken, unsubscribeHeaders, unsubscribePageUrl } from "./src/lib/email/unsubscribe.js";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL,
@@ -30,14 +31,15 @@ const supabase = createClient(
 const DAY_MS = 24 * 60 * 60 * 1000;
 export const DAY7_WINDOW_DAYS = { min: 7, max: 14 };
 
-/** Accounts due the day-7 email: 7–14 days old, never sent it. */
+/** Accounts due the day-7 email: 7–14 days old, never sent it, not unsubscribed. */
 export function dueForDay7(users, profileById, now = Date.now()) {
   const newest = now - DAY7_WINDOW_DAYS.min * DAY_MS;
   const oldest = now - DAY7_WINDOW_DAYS.max * DAY_MS;
   return users.filter((u) => {
     const created = new Date(u.created_at).getTime();
     if (created > newest || created < oldest) return false;
-    return !profileById.get(u.id)?.day7_email_sent_at;
+    const profile = profileById.get(u.id);
+    return !profile?.day7_email_sent_at && !profile?.email_opt_out_at;
   });
 }
 
@@ -64,7 +66,7 @@ export async function runDay7EmailJob() {
 
   const { data: profiles, error: profilesErr } = await supabase
     .from("profiles")
-    .select("id, display_name, day7_email_sent_at");
+    .select("id, display_name, day7_email_sent_at, email_opt_out_at");
   if (profilesErr) {
     console.error("[day7-email-job] profiles fetch failed:", profilesErr);
     return false;
@@ -80,8 +82,10 @@ export async function runDay7EmailJob() {
   for (const user of due) {
     if (!user.email) continue;
     const firstName = profileById.get(user.id)?.display_name?.split(" ")[0] ?? "";
-    const { subject, text, replyTo } = day7Email(firstName);
-    const result = await sendEmail({ to: user.email, subject, text, replyTo });
+    // Throws without AGENT_SECRET: better no email than one with no way to unsubscribe.
+    const token = signUnsubscribeToken(user.id);
+    const { subject, text, replyTo } = day7Email(firstName, unsubscribePageUrl(token));
+    const result = await sendEmail({ to: user.email, subject, text, replyTo, headers: unsubscribeHeaders(token) });
     if (result.sent) {
       const { error } = await supabase
         .from("profiles")
