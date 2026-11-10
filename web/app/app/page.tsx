@@ -8,6 +8,8 @@ import ReportViewer from "../../components/ReportViewer";
 import DeepDiveProgress from "../../components/DeepDiveProgress";
 import DeepDiveViewer from "../../components/DeepDiveViewer";
 import ReportIssueForm from "../../components/ReportIssueForm";
+import SalesTab from "../../components/SalesTab";
+import type { SalesBundle } from "../../lib/sales";
 import ErrorBoundary from "../../components/ErrorBoundary";
 import ResearchSkeleton, { type RunProgress } from "../../components/ResearchSkeleton";
 import EmptyState from "../../components/EmptyState";
@@ -21,6 +23,8 @@ interface Run {
   subject: string;
   generatedAt: string;
   reportPath: string;
+  /** The report's structured data; the Sales tab reads it. */
+  bundle?: SalesBundle | null;
 }
 
 interface DeepDiveSection {
@@ -36,7 +40,7 @@ interface DeepDiveBundle {
   sections: DeepDiveSection[];
 }
 
-type ActiveTab = "summary" | "deep-dive";
+type ActiveTab = "summary" | "sales" | "deep-dive";
 type DeepDiveState = "idle" | "confirming" | "running" | "done";
 
 // Mix of real companies and a couple fictional ones — gives new users
@@ -487,6 +491,12 @@ function Dashboard() {
                       Summary
                     </button>
                     <button
+                      className={`${styles.tab} ${activeTab === "sales" ? styles.tabActive : ""}`}
+                      onClick={() => setActiveTab("sales")}
+                    >
+                      Sales
+                    </button>
+                    <button
                       className={`${styles.tab} ${activeTab === "deep-dive" ? styles.tabActive : ""} ${deepDiveState === "idle" ? styles.tabLocked : ""}`}
                       onClick={() => {
                         if (deepDiveState === "idle") setDeepDiveState("confirming");
@@ -537,6 +547,15 @@ function Dashboard() {
                                 sectionTitles={report.split("\n").filter((l) => l.startsWith("## ")).map((l) => l.replace("## ", "").trim())}
                               />
                             )}
+                          </ErrorBoundary>
+                        )
+                      )}
+                      {activeTab === "sales" && selected && (
+                        rerunning ? (
+                          <ResearchSkeleton subject={selected.subject} type={selected.type} />
+                        ) : (
+                          <ErrorBoundary>
+                            <SalesTab subject={selected.subject} bundle={selected.bundle} />
                           </ErrorBoundary>
                         )
                       )}
