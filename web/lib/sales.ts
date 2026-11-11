@@ -28,7 +28,7 @@ export interface SalesBundle {
   funding?: { round?: string; amount?: string; date?: string; url?: string; investors?: string[] }[];
   corporateActions?: { kind: string; name: string; date?: string; url: string }[];
   courtCases?: { caption: string; filed?: string; url: string; routine?: boolean; caseType?: string }[];
-  federalSpending?: { awardingAgency?: string; amount?: string; date?: string; awardType?: string; description?: string }[];
+  federalSpending?: { awardingAgency?: string; amount?: string; date?: string; endDate?: string; awardType?: string; description?: string }[];
   sources?: { url: string; title?: string; usedFor: string[] }[];
   competitors?: { name: string; url?: string }[];
   techStack?: {
@@ -98,7 +98,7 @@ export function isCompetitor(vendor: string, competitors: string[]): boolean {
 
 // ── Why now ──────────────────────────────────────────────────────────────────
 
-export type WhyNowKind = "News" | "Funding" | "Acquisition" | "Subsidiary or brand" | "Court case" | "Federal award";
+export type WhyNowKind = "News" | "Funding" | "Acquisition" | "Subsidiary or brand" | "Court case" | "Federal award" | "Contract ending";
 
 export interface WhyNowItem {
   kind: WhyNowKind;
@@ -122,10 +122,20 @@ function parseDate(s: string | undefined): Date | undefined {
 
 const shortDate = (d: Date) => d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
 
+/** Whole calendar months from `now` until `end` (UTC). */
+function monthsUntil(end: Date, now: Date): number {
+  let m = (end.getUTCFullYear() - now.getUTCFullYear()) * 12 + (end.getUTCMonth() - now.getUTCMonth());
+  if (end.getUTCDate() < now.getUTCDate()) m -= 1;
+  return m;
+}
+
+const isGrant = (awardType: string | undefined) => /grant|assistance|cooperative/i.test(awardType ?? "");
+
 /**
  * Dated, sourced events from the last year, newest first: news (not law-firm
  * solicitations), funding, acquisitions, non-routine court cases and federal
- * awards. Federal awards cite the report's USAspending source.
+ * awards. Federal awards cite the report's USAspending source. Federal
+ * contracts (not grants) ending in the next year are listed by end date.
  */
 export function whyNow(b: SalesBundle, now = new Date()): WhyNowItem[] {
   const cutoff = now.getTime() - WHY_NOW_WINDOW_DAYS * DAY;
@@ -150,6 +160,13 @@ export function whyNow(b: SalesBundle, now = new Date()): WhyNowItem[] {
   for (const f of b.federalSpending ?? []) {
     const text = [f.amount, f.awardType?.toLowerCase(), f.awardingAgency ? `from ${f.awardingAgency}` : ""].filter(Boolean).join(" ");
     add("Federal award", f.date, text || "Federal award", spending?.url, "USAspending.gov");
+    const end = parseDate(f.endDate);
+    if (end && spending?.url && !isGrant(f.awardType) && end.getTime() >= now.getTime() && end.getTime() <= now.getTime() + WHY_NOW_WINDOW_DAYS * DAY) {
+      const m = monthsUntil(end, now);
+      const when = m < 1 ? "under a month" : m === 1 ? "1 month" : `${m} months`;
+      const what = [f.amount, "contract", f.awardingAgency ? `with ${f.awardingAgency}` : ""].filter(Boolean).join(" ");
+      items.push({ kind: "Contract ending", date: shortDate(end), at: end.toISOString(), text: `${what} ends in ${when}`, url: spending.url, sourceName: "USAspending.gov" });
+    }
   }
 
   const seen = new Set<string>();

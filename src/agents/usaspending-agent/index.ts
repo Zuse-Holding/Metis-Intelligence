@@ -129,6 +129,7 @@ export class USASpendingAgent {
             "Awarding Agency",
             "Award Amount",
             "Start Date",
+            "End Date",
             "Description",
             "Award Type",
             "Recipient UEI",
@@ -211,6 +212,7 @@ export class USASpendingAgent {
         awardingAgency: toStr(r["Awarding Agency"]),
         amount: formatAmount(r["Award Amount"]),
         date: toStr(r["Start Date"]),
+        endDate: toStr(r["End Date"]),
         awardType: toStr(r["Award Type"]),
         description: toStr(r["Description"]),
       }));

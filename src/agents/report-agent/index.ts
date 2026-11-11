@@ -7,6 +7,7 @@ import { pushRelatedSection } from "../related-entities-agent/render.js";
 import { CreatorResearchBundle, PersonResearchBundle, PoliticalResearchBundle, ProductResearchBundle, ResearchBundle, Source } from "../../types/research.js";
 import type { Form4Entry } from "../../types/research.js";
 import { saleValue } from "../../lib/insiders.js";
+import { contractEndPhrase } from "../../lib/contract-end.js";
 import { affiliationDates, roleDates } from "../../lib/person-sources.js";
 import { namesOrg } from "../../lib/person-checks.js";
 import { BUILD_ID } from "../../lib/build.js";
@@ -250,10 +251,11 @@ export class ReportAgent {
         lines.push(`- **${c.agency}: ${money(c.ceiling)} ceiling announced; about ${money(c.obligated)} obligated to date.**${c.newsUrl ? ` ([announcement](${c.newsUrl}))` : ""}`);
       }
       for (const f of bundle.federalSpending) {
+        const ends = contractEndPhrase(f.endDate);
         lines.push(
           `- **${f.amount ?? "Undisclosed"}**${f.awardType ? ` (${f.awardType})` : ""} — ${
             f.awardingAgency ?? "Unknown agency"
-          }${f.date ? ` (${f.date})` : ""}${f.description ? `: ${f.description}` : ""}`
+          }${f.date ? ` (${f.date})` : ""}${ends ? `, ${ends}` : ""}${f.description ? `: ${f.description}` : ""}`
         );
       }
       lines.push(``);

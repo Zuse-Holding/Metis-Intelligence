@@ -57,6 +57,23 @@ test("federal awards cite the report's USAspending source, and are dropped witho
   assert.equal(whyNow({ ...BUNDLE, sources: [] }, NOW).some((i) => i.kind === "Federal award"), false);
 });
 
+test("federal contracts ending in the next year are listed by end date; grants, past and far-off ends are not", () => {
+  const b: SalesBundle = {
+    ...BUNDLE,
+    federalSpending: [
+      { awardingAgency: "Department of Energy", amount: "$1.2M", date: "2020-07-01", endDate: "2027-04-30", awardType: "Contract" },
+      { awardingAgency: "NSF", amount: "$300K", date: "2020-01-01", endDate: "2027-01-31", awardType: "Grant" },
+      { awardingAgency: "Navy", amount: "$5M", date: "2020-01-01", endDate: "2026-10-01", awardType: "Contract" },
+      { awardingAgency: "Army", amount: "$9M", date: "2020-01-01", endDate: "2029-01-01", awardType: "Contract" },
+    ],
+  };
+  const ending = whyNow(b, NOW).filter((i) => i.kind === "Contract ending");
+  assert.deepEqual(ending.map((i) => [i.date, i.text, i.url]), [
+    ["Apr 30, 2027", "$1.2M contract with Department of Energy ends in 5 months", "https://api.usaspending.gov/search"],
+  ]);
+  assert.equal(whyNow({ ...b, sources: [] }, NOW).some((i) => i.kind === "Contract ending"), false);
+});
+
 test("funding names up to three investors", () => {
   assert.equal(whyNow(BUNDLE, NOW).find((i) => i.kind === "Funding")!.text, "Series B, $40M from Fund One, Fund Two");
 });
