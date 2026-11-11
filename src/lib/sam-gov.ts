@@ -48,6 +48,11 @@ export interface SamOpportunity {
 
 const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
 
+/** The public SAM.gov page for a notice; no login needed. */
+export function samNoticeUrl(noticeId: string): string {
+  return `https://sam.gov/opp/${noticeId}/view`;
+}
+
 /** MM/dd/yyyy, as the API wants dates. */
 export function samDate(d: Date): string {
   const p = (n: number) => String(n).padStart(2, "0");
@@ -72,7 +77,6 @@ export function parseOpportunities(body: unknown): SamOpportunity[] {
     if (!/^[A-Za-z0-9_-]+$/.test(id)) continue;
     const deadline = str(r.responseDeadLine);
     const deadlineOk = deadline && !Number.isNaN(Date.parse(deadline)) ? new Date(deadline).toISOString() : null;
-    const ui = str(r.uiLink);
     out.push({
       notice_id: id,
       title: title.slice(0, 500),
@@ -83,7 +87,9 @@ export function parseOpportunities(body: unknown): SamOpportunity[] {
       set_aside: str(r.typeOfSetAsideDescription),
       posted_date: posted.slice(0, 10),
       response_deadline: deadlineOk,
-      url: ui && ui.startsWith("https://sam.gov/") ? ui : `https://sam.gov/opp/${id}/view`,
+      // The public notice page. The API's uiLink points at the signed-in
+      // workspace (sam.gov/workspace/contract/opp/…), which asks to log in.
+      url: samNoticeUrl(id),
     });
   }
   return out;

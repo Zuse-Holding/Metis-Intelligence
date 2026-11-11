@@ -13,7 +13,7 @@ const NOTICE = {
   typeOfSetAsideDescription: "Total Small Business Set-Aside",
   responseDeadLine: "2026-12-15T17:00:00-05:00",
   active: "Yes",
-  uiLink: "https://sam.gov/opp/abc123/view",
+  uiLink: "https://sam.gov/workspace/contract/opp/abc123/view",
 };
 
 test("dates are MM/dd/yyyy", () => {
@@ -26,7 +26,7 @@ test("keeps active shopping-type notices, with a SAM.gov link", () => {
       NOTICE,
       { ...NOTICE, noticeId: "award1", type: "Award Notice" },
       { ...NOTICE, noticeId: "inactive", active: "No" },
-      { ...NOTICE, noticeId: "nolink", uiLink: "https://evil.example/x" },
+      { ...NOTICE, noticeId: "nolink", uiLink: undefined },
       { ...NOTICE, noticeId: "bad id!" },
       { title: "missing fields" },
     ],
@@ -34,6 +34,7 @@ test("keeps active shopping-type notices, with a SAM.gov link", () => {
   assert.deepEqual(rows.map((r) => r.notice_id), ["abc123", "nolink"]);
   assert.equal(rows[0].response_deadline, "2026-12-15T22:00:00.000Z");
   assert.equal(rows[0].agency_path, "DEPT OF DEFENSE.DEPT OF THE NAVY.NAVSUP");
+  assert.equal(rows[0].url, "https://sam.gov/opp/abc123/view"); // public page, not the signed-in workspace link
   assert.equal(rows[1].url, "https://sam.gov/opp/nolink/view");
   assert.deepEqual(parseOpportunities({}), []);
 });
