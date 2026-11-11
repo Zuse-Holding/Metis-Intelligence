@@ -42,6 +42,8 @@ export interface TierConfig {
   // validated on real cases. See the matching comment in
   // server/agent-server.ts's TierConfig.
   creatorAccess: boolean;
+  // Account pipeline — Pro and above. See server/agent-server.ts.
+  accountsAccess: boolean;
 }
 
 /** Basic-tier monthly quick-profile usage, from the billing-anniversary
@@ -127,6 +129,7 @@ const DEFAULT_CONFIG: TierConfig = {
   monthlyDeepDiveLimit: -1,
   publicRecordsAccess: false,
   creatorAccess: false,
+  accountsAccess: false,
 };
 
 const TierContext = createContext<TierContextValue>({

@@ -10,6 +10,7 @@ export const PRIVATE_PREFIXES = [
   "/dashboard",
   "/settings",
   "/watchlist",
+  "/accounts",
   "/intel-feed",
   "/knowledge-graph",
   "/reports",
