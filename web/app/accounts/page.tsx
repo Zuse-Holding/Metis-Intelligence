@@ -20,6 +20,7 @@ import {
   type ChangedFinding,
   type Health,
 } from "../../lib/accounts";
+import { INTENT_LABELS, INTENT_REASON_LABELS, type Intent } from "../../lib/intent";
 import styles from "./page.module.css";
 
 interface Account {
@@ -39,6 +40,8 @@ interface Account {
   freshTriggers: number;
   health: Health;
   healthReasons: string[];
+  /** Present when buyer intent is on. */
+  intent?: Intent;
 }
 
 interface Changes {
@@ -47,7 +50,7 @@ interface Changes {
   added: ChangedFinding[] | null;
 }
 
-type Panel = { id: string; kind: "deal" | "changes" } | null;
+type Panel = { id: string; kind: "deal" | "changes" | "intent" } | null;
 type View = "list" | "pipeline";
 
 function formatDate(iso: string | null) {
@@ -66,6 +69,20 @@ function HealthBadge({ health, reasons }: { health: Health; reasons: string[] })
     <span className={`${styles.health} ${styles[`health_${health}`]}`} title={reasons.join("\n") || undefined}>
       {HEALTH_LABELS[health]}
     </span>
+  );
+}
+
+function IntentBadge({ intent, onClick }: { intent: Intent; onClick: () => void }) {
+  const n = intent.reasons.length;
+  return (
+    <button
+      type="button"
+      className={`${styles.health} ${styles.intentBadge} ${styles[`intent_${intent.level}`]}`}
+      onClick={onClick}
+      title={n ? `${n} buying signal${n === 1 ? "" : "s"}: show why` : "No buying signals found: show why"}
+    >
+      {INTENT_LABELS[intent.level]}
+    </button>
   );
 }
 
@@ -202,6 +219,40 @@ export default function AccountsPage() {
     if (panel?.id === id && panel.kind === "changes") return setPanel(null);
     setPanel({ id, kind: "changes" });
     loadChanges(id);
+  }
+
+  function toggleIntent(id: string) {
+    setPanel(panel?.id === id && panel.kind === "intent" ? null : { id, kind: "intent" });
+  }
+
+  function renderIntent(a: Account) {
+    const intent = a.intent;
+    if (!intent) return null;
+    if (intent.reasons.length === 0) {
+      return (
+        <EmptyState
+          size="compact"
+          title="No buying signals found"
+          when="Updates when the account's report is re-run and as SAM.gov posts new solicitations"
+          description="Signals are open SAM.gov solicitations from this agency in your category, federal contracts ending soon, stated plans in the news and DNS-backed tech stack changes."
+        />
+      );
+    }
+    return (
+      <div className={styles.changeSection}>
+        <div className={styles.changeHeading}>Why {INTENT_LABELS[intent.level].toLowerCase()}</div>
+        <ul className={styles.changeList}>
+          {intent.reasons.map((r, i) => (
+            <li key={i}>
+              <span className={styles.muted}>{INTENT_REASON_LABELS[r.kind]}: </span>
+              <a href={r.url} target="_blank" rel="noopener noreferrer">{r.text}</a>
+              <span className={styles.source}> · {r.sourceName}</span>
+              {r.date && <span className={`${styles.muted} ${styles.mono}`}> · {r.date}</span>}
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
   }
 
   function toggleDeal(a: Account) {
@@ -458,6 +509,7 @@ export default function AccountsPage() {
                           <div className={styles.cardTop}>
                             <span className={styles.company}>{companyLink(a)}</span>
                             <HealthBadge health={a.health} reasons={a.healthReasons} />
+                            {a.intent && <IntentBadge intent={a.intent} onClick={() => { setView("list"); toggleIntent(a.id); }} />}
                           </div>
                           <div className={styles.cardMeta}>
                             <span className={styles.mono}>{formatMoney(a.dealValue)}</span>
@@ -504,6 +556,7 @@ export default function AccountsPage() {
                             <span className={styles.company}>
                               {companyLink(a)}
                               <HealthBadge health={a.health} reasons={a.healthReasons} />
+                              {a.intent && <IntentBadge intent={a.intent} onClick={() => toggleIntent(a.id)} />}
                               {a.freshTriggers > 0 && <span className={styles.fresh} title="Triggers found in the last 14 days">{a.freshTriggers} new</span>}
                             </span>
                             <span>{stageSelect(a)}</span>
@@ -539,6 +592,7 @@ export default function AccountsPage() {
                           {a.nextStep && panel?.id !== a.id && <div className={styles.nextStepRow}>Next: {a.nextStep}</div>}
                           {panel?.id === a.id && panel.kind === "deal" && <div className={styles.panel}>{renderDeal(a)}</div>}
                           {panel?.id === a.id && panel.kind === "changes" && <div className={styles.panel}>{renderChanges(a)}</div>}
+                          {panel?.id === a.id && panel.kind === "intent" && <div className={styles.panel}>{renderIntent(a)}</div>}
                         </div>
                       ))}
                     </div>

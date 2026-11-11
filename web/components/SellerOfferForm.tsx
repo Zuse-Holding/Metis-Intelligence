@@ -2,6 +2,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { MAX_OFFERING, MAX_TARGET, type SellerOffer } from "../lib/sales";
 import { Spinner } from "./Skeleton";
+import { isEnabled } from "../lib/flags";
 import styles from "./SellerOfferForm.module.css";
 
 interface Props {
@@ -11,11 +12,15 @@ interface Props {
   intro?: string;
 }
 
+const list = (s: string) => s.split(/[,\n]/).map((c) => c.trim()).filter(Boolean);
+
 /** "What you sell": used on Settings and inline on the Sales tab. */
 export default function SellerOfferForm({ offer, onSaved, intro }: Props) {
   const [offering, setOffering] = useState(offer?.offering ?? "");
   const [targetCustomers, setTargetCustomers] = useState(offer?.targetCustomers ?? "");
   const [competitors, setCompetitors] = useState((offer?.competitors ?? []).join(", "));
+  const [naicsCodes, setNaicsCodes] = useState((offer?.naicsCodes ?? []).join(", "));
+  const [keywords, setKeywords] = useState((offer?.keywords ?? []).join(", "));
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -24,6 +29,8 @@ export default function SellerOfferForm({ offer, onSaved, intro }: Props) {
     setOffering(offer?.offering ?? "");
     setTargetCustomers(offer?.targetCustomers ?? "");
     setCompetitors((offer?.competitors ?? []).join(", "));
+    setNaicsCodes((offer?.naicsCodes ?? []).join(", "));
+    setKeywords((offer?.keywords ?? []).join(", "));
   }, [offer]);
 
   async function save(e: FormEvent) {
@@ -38,7 +45,9 @@ export default function SellerOfferForm({ offer, onSaved, intro }: Props) {
         body: JSON.stringify({
           offering,
           targetCustomers,
-          competitors: competitors.split(/[,\n]/).map((c) => c.trim()).filter(Boolean),
+          competitors: list(competitors),
+          naicsCodes: list(naicsCodes),
+          keywords: list(keywords),
         }),
       });
       const data = await res.json().catch(() => null);
@@ -86,6 +95,29 @@ export default function SellerOfferForm({ offer, onSaved, intro }: Props) {
         />
         <span className={styles.hint}>Use the vendor&apos;s name as it appears in a report&apos;s tech stack, so we can flag accounts that use them.</span>
       </label>
+      {isEnabled("buyer_intent") && <>
+      <label className={styles.field}>
+        <span className={styles.label}>NAICS codes</span>
+        <input
+          className={styles.input}
+          value={naicsCodes}
+          onChange={(e) => { setNaicsCodes(e.target.value); setSaved(false); }}
+          inputMode="numeric"
+          placeholder="Up to 5, separated by commas, e.g. 541512, 5415"
+        />
+        <span className={styles.hint}>Finds federal solicitations on SAM.gov in your category. A shorter code covers every code under it.</span>
+      </label>
+      <label className={styles.field}>
+        <span className={styles.label}>Solicitation keywords</span>
+        <input
+          className={styles.input}
+          value={keywords}
+          onChange={(e) => { setKeywords(e.target.value); setSaved(false); }}
+          placeholder="Up to 10, separated by commas, e.g. telematics, fleet management"
+        />
+        <span className={styles.hint}>Matched as whole words in SAM.gov notice titles.</span>
+      </label>
+      </>}
       {error && <div className={styles.error} role="alert">{error}</div>}
       <div className={styles.actions}>
         <button className={styles.saveBtn} type="submit" disabled={saving || !offering.trim()}>

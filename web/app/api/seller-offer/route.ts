@@ -9,7 +9,7 @@ export async function GET() {
   if (!user) return NextResponse.json({ error: "Your session expired. Sign in again." }, { status: 401 });
   const { data, error } = await supabase
     .from("seller_offers")
-    .select("offering, competitors, target_customers")
+    .select("offering, competitors, target_customers, naics_codes, keywords")
     .eq("user_id", user.id)
     .maybeSingle();
   if (error) {
@@ -17,7 +17,13 @@ export async function GET() {
     return NextResponse.json({ error: "Couldn't load what you sell." }, { status: 500 });
   }
   const offer: SellerOffer | null = data
-    ? { offering: data.offering as string, competitors: (data.competitors as string[]) ?? [], targetCustomers: (data.target_customers as string) ?? "" }
+    ? {
+        offering: data.offering as string,
+        competitors: (data.competitors as string[]) ?? [],
+        targetCustomers: (data.target_customers as string) ?? "",
+        naicsCodes: (data.naics_codes as string[]) ?? [],
+        keywords: (data.keywords as string[]) ?? [],
+      }
     : null;
   return NextResponse.json({ offer });
 }
@@ -29,11 +35,11 @@ export async function PUT(req: NextRequest) {
   if (!user) return NextResponse.json({ error: "Your session expired. Sign in again." }, { status: 401 });
   const parsed = parseSellerOffer(await req.json().catch(() => null));
   if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
-  const { offering, competitors, targetCustomers } = parsed.offer;
+  const { offering, competitors, targetCustomers, naicsCodes, keywords } = parsed.offer;
   const { error } = await supabase
     .from("seller_offers")
     .upsert(
-      { user_id: user.id, offering, competitors, target_customers: targetCustomers, updated_at: new Date().toISOString() },
+      { user_id: user.id, offering, competitors, target_customers: targetCustomers, naics_codes: naicsCodes, keywords, updated_at: new Date().toISOString() },
       { onConflict: "user_id" },
     );
   if (error) {

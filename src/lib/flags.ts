@@ -13,11 +13,12 @@
  *   FEATURE_FACT_CACHE=on         saved, sourced company basics reused across runs (round 10; needs company_profiles)
  *   FEATURE_TECH_STACK=on         tech stack from public DNS and the homepage (ABM brief §2, phase 1)
  *   FEATURE_ACCOUNT_REFRESH=on    weekly re-runs of saved accounts, off the plan limits (ABM brief §4; needs the pipeline SQL)
+ *   FEATURE_BUYER_INTENT=on       buying signals on saved accounts and the daily SAM.gov pull (needs the buyer intent SQL; the pull needs SAM_GOV_API_KEY)
  *
  * Server-side only. The web app reads its own NEXT_PUBLIC_FEATURE_* copy
  * where the UI needs to know (see web/lib/flags.ts).
  */
-export type Flag = "provenance" | "coverage" | "entity_resolution" | "domain_posture" | "self_exclusion" | "related_entities" | "gap_fill" | "fact_cache" | "tech_stack" | "account_refresh";
+export type Flag = "provenance" | "coverage" | "entity_resolution" | "domain_posture" | "self_exclusion" | "related_entities" | "gap_fill" | "fact_cache" | "tech_stack" | "account_refresh" | "buyer_intent";
 
 export function isEnabled(flag: Flag, env: Record<string, string | undefined> = process.env): boolean {
   const value = env[`FEATURE_${flag.toUpperCase()}`]?.trim().toLowerCase();
