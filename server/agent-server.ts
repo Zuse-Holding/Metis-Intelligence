@@ -42,9 +42,14 @@ import { sendEmail } from "../src/lib/email/send.js";
 import { welcomeEmail, capReachedEmail } from "../src/lib/email/copy.js";
 import { createClient } from "@supabase/supabase-js";
 import { BUILD_ID } from "../src/lib/build.js";
+import { claimDueAccount, recordAccountTriggers } from "../src/lib/account-pipeline.js";
+import { isEnabled } from "../src/lib/flags.js";
+import type { ResearchBundle } from "../src/types/research.js";
 
 const app  = express();
 const PORT = process.env.PORT ?? process.env.AGENT_PORT ?? 4000;
+// Marks this server's own scheduled account refreshes; never leaves the process.
+const SCHEDULED_RUN_TOKEN = randomUUID();
 
 const ALLOWED_ORIGIN = process.env.FRONTEND_URL ?? "http://localhost:3000";
 app.use(cors({ origin: ALLOWED_ORIGIN, credentials: true }));
@@ -168,6 +173,10 @@ interface TierConfig {
   // radius than a paid-tier upsell before it's been proven out). Revisit
   // once it's been run against enough real names to trust the signal.
   creatorAccess: boolean;
+  // Account pipeline (ABM brief §4): saved target companies with stage,
+  // owner, notes and CSV export. Pro and above; the web API routes check it
+  // before every write (the accounts table is read-only to its owner).
+  accountsAccess: boolean;
 }
 
 // Phase 1 fair-use soft caps — env-configurable per the spec, rather than
@@ -179,23 +188,23 @@ const RATE_LIMIT_FREE_PER_HOUR = Number(process.env.RATE_LIMIT_FREE_PER_HOUR ?? 
 const RATE_LIMIT_PAID_PER_HOUR = Number(process.env.RATE_LIMIT_PAID_PER_HOUR ?? 30);
 
 const TIER_CONFIG: Record<Tier, TierConfig> = {
-  internal: { windowResearchLimit: -1, windowDeepDiveLimit: -1, deepDiveAccess: true, politicalAccess: true, watchlistLimit: -1, knowledgeGraphAccess: true, exportAccess: true, charonProtocol: true, chatWidgetAccess: true, personResearchAccess: true, personSearchAccess: true, muckrockAccess: true, adminAccess: true, monthlyResearchLimit: -1, lifetimeResearchLimit: -1, monthlyDeepDiveLimit: -1, hourlyResearchLimit: -1, publicRecordsAccess: true, creatorAccess: true },
+  internal: { windowResearchLimit: -1, windowDeepDiveLimit: -1, deepDiveAccess: true, politicalAccess: true, watchlistLimit: -1, knowledgeGraphAccess: true, exportAccess: true, charonProtocol: true, chatWidgetAccess: true, personResearchAccess: true, personSearchAccess: true, muckrockAccess: true, adminAccess: true, monthlyResearchLimit: -1, lifetimeResearchLimit: -1, monthlyDeepDiveLimit: -1, hourlyResearchLimit: -1, publicRecordsAccess: true, creatorAccess: true, accountsAccess: true },
   // Team is not sold (Phase 1 task 1.6) — left exactly as-is otherwise;
   // may be relabeled/reworked once the multi-seat workspace feature
   // (docs/team-features-scoping.md) actually exists.
-  team:     { windowResearchLimit: 200, windowDeepDiveLimit: 20, deepDiveAccess: true, politicalAccess: true, watchlistLimit: 50, knowledgeGraphAccess: true, exportAccess: true, charonProtocol: false, chatWidgetAccess: true, personResearchAccess: false, personSearchAccess: true, muckrockAccess: false, adminAccess: false, monthlyResearchLimit: -1, lifetimeResearchLimit: -1, monthlyDeepDiveLimit: -1, hourlyResearchLimit: RATE_LIMIT_PAID_PER_HOUR, publicRecordsAccess: true, creatorAccess: false },
+  team:     { windowResearchLimit: 200, windowDeepDiveLimit: 20, deepDiveAccess: true, politicalAccess: true, watchlistLimit: 50, knowledgeGraphAccess: true, exportAccess: true, charonProtocol: false, chatWidgetAccess: true, personResearchAccess: false, personSearchAccess: true, muckrockAccess: false, adminAccess: false, monthlyResearchLimit: -1, lifetimeResearchLimit: -1, monthlyDeepDiveLimit: -1, hourlyResearchLimit: RATE_LIMIT_PAID_PER_HOUR, publicRecordsAccess: true, creatorAccess: false, accountsAccess: true },
   // Pro: quick-profile and Deep Dive caps are both monthly fair-use soft
   // caps now, not unlimited — windowDeepDiveLimit set to -1 since
   // monthlyDeepDiveLimit replaces it for this tier specifically.
-  pro:      { windowResearchLimit: 50, windowDeepDiveLimit: -1, deepDiveAccess: true, politicalAccess: true, watchlistLimit: -1, knowledgeGraphAccess: true, exportAccess: true, charonProtocol: false, chatWidgetAccess: true, personResearchAccess: false, personSearchAccess: true, muckrockAccess: false, adminAccess: false, monthlyResearchLimit: PRO_MONTHLY_RESEARCH_LIMIT, lifetimeResearchLimit: -1, monthlyDeepDiveLimit: PRO_MONTHLY_DEEP_DIVE_LIMIT, hourlyResearchLimit: RATE_LIMIT_PAID_PER_HOUR, publicRecordsAccess: true, creatorAccess: false },
+  pro:      { windowResearchLimit: 50, windowDeepDiveLimit: -1, deepDiveAccess: true, politicalAccess: true, watchlistLimit: -1, knowledgeGraphAccess: true, exportAccess: true, charonProtocol: false, chatWidgetAccess: true, personResearchAccess: false, personSearchAccess: true, muckrockAccess: false, adminAccess: false, monthlyResearchLimit: PRO_MONTHLY_RESEARCH_LIMIT, lifetimeResearchLimit: -1, monthlyDeepDiveLimit: PRO_MONTHLY_DEEP_DIVE_LIMIT, hourlyResearchLimit: RATE_LIMIT_PAID_PER_HOUR, publicRecordsAccess: true, creatorAccess: false, accountsAccess: true },
   // Basic: PDF export added (Phase 1 task 1.6 — was withheld before).
-  basic:    { windowResearchLimit: 10, windowDeepDiveLimit: 0, deepDiveAccess: false, politicalAccess: false, watchlistLimit: 5, knowledgeGraphAccess: false, exportAccess: true, charonProtocol: false, chatWidgetAccess: false, personResearchAccess: false, personSearchAccess: true, muckrockAccess: false, adminAccess: false, monthlyResearchLimit: 25, lifetimeResearchLimit: -1, monthlyDeepDiveLimit: -1, hourlyResearchLimit: RATE_LIMIT_PAID_PER_HOUR, publicRecordsAccess: false, creatorAccess: false },
+  basic:    { windowResearchLimit: 10, windowDeepDiveLimit: 0, deepDiveAccess: false, politicalAccess: false, watchlistLimit: 5, knowledgeGraphAccess: false, exportAccess: true, charonProtocol: false, chatWidgetAccess: false, personResearchAccess: false, personSearchAccess: true, muckrockAccess: false, adminAccess: false, monthlyResearchLimit: 25, lifetimeResearchLimit: -1, monthlyDeepDiveLimit: -1, hourlyResearchLimit: RATE_LIMIT_PAID_PER_HOUR, publicRecordsAccess: false, creatorAccess: false, accountsAccess: false },
   // Free (Phase 1): the real default for new signups now (see getUserTier
   // below) — 3 quick profiles LIFETIME, not recurring, hence
   // windowResearchLimit/monthlyResearchLimit both -1 here and the cap
   // living entirely in lifetimeResearchLimit. 1 watchlist entity, no
   // Deep Dive, no export.
-  free:     { windowResearchLimit: -1, windowDeepDiveLimit: 0, deepDiveAccess: false, politicalAccess: false, watchlistLimit: 1, knowledgeGraphAccess: false, exportAccess: false, charonProtocol: false, chatWidgetAccess: false, personResearchAccess: false, personSearchAccess: false, muckrockAccess: false, adminAccess: false, monthlyResearchLimit: -1, lifetimeResearchLimit: 3, monthlyDeepDiveLimit: -1, hourlyResearchLimit: RATE_LIMIT_FREE_PER_HOUR, publicRecordsAccess: false, creatorAccess: false },
+  free:     { windowResearchLimit: -1, windowDeepDiveLimit: 0, deepDiveAccess: false, politicalAccess: false, watchlistLimit: 1, knowledgeGraphAccess: false, exportAccess: false, charonProtocol: false, chatWidgetAccess: false, personResearchAccess: false, personSearchAccess: false, muckrockAccess: false, adminAccess: false, monthlyResearchLimit: -1, lifetimeResearchLimit: 3, monthlyDeepDiveLimit: -1, hourlyResearchLimit: RATE_LIMIT_FREE_PER_HOUR, publicRecordsAccess: false, creatorAccess: false, accountsAccess: false },
   // Time-boxed tier for external demo/partner accounts (limited partners,
   // investor trials, etc). Deliberately mirrors "team" limits and features
   // so the demo shows the platform at full strength — the ONLY things it
@@ -203,7 +212,7 @@ const TIER_CONFIG: Record<Tier, TierConfig> = {
   // which stay off regardless of what tier
   // gets requested for these accounts. Expiry enforced via
   // profiles.trial_expires_at, checked in getUserTier below.
-  trial:    { windowResearchLimit: 200, windowDeepDiveLimit: 20, deepDiveAccess: true, politicalAccess: false, watchlistLimit: 50, knowledgeGraphAccess: true, exportAccess: true, charonProtocol: false, chatWidgetAccess: true, personResearchAccess: false, personSearchAccess: true, muckrockAccess: false, adminAccess: false, monthlyResearchLimit: -1, lifetimeResearchLimit: -1, monthlyDeepDiveLimit: -1, hourlyResearchLimit: -1, publicRecordsAccess: true, creatorAccess: false },
+  trial:    { windowResearchLimit: 200, windowDeepDiveLimit: 20, deepDiveAccess: true, politicalAccess: false, watchlistLimit: 50, knowledgeGraphAccess: true, exportAccess: true, charonProtocol: false, chatWidgetAccess: true, personResearchAccess: false, personSearchAccess: true, muckrockAccess: false, adminAccess: false, monthlyResearchLimit: -1, lifetimeResearchLimit: -1, monthlyDeepDiveLimit: -1, hourlyResearchLimit: -1, publicRecordsAccess: true, creatorAccess: false, accountsAccess: true },
 };
 
 /**
@@ -258,7 +267,7 @@ const EXPIRED_CONFIG: TierConfig = {
   personResearchAccess: false, personSearchAccess: false, muckrockAccess: false, adminAccess: false,
   monthlyResearchLimit: 0, lifetimeResearchLimit: 0, monthlyDeepDiveLimit: 0,
   hourlyResearchLimit: 0,
-  publicRecordsAccess: false, creatorAccess: false,
+  publicRecordsAccess: false, creatorAccess: false, accountsAccess: false,
 };
 
 function getTierConfig(tier: Tier | "expired"): TierConfig {
@@ -280,7 +289,7 @@ async function getUsageWindow(userId: string): Promise<UsageWindow> {
   const times = async (table: "research_runs" | "deep_dives") => {
     // Failed and partial reports don't count toward a plan (launch fix 53).
     const { data, error } = table === "research_runs"
-      ? await supabase.from(table).select("generated_at, status, partial:bundle->>partial").eq("user_id", userId).gte("generated_at", since)
+      ? await supabase.from(table).select("generated_at, status, partial:bundle->>partial").eq("user_id", userId).eq("scheduled", false).gte("generated_at", since)
       : await supabase.from(table).select("generated_at").eq("user_id", userId).gte("generated_at", since);
     if (error) {
       console.error(`[usage-window] ${table} fetch error:`, JSON.stringify(error));
@@ -358,6 +367,7 @@ async function getMonthlyPersonSearchCount(userId: string): Promise<number> {
     .select("id", { count: "exact", head: true })
     .eq("user_id", userId)
     .eq("type", "person")
+    .eq("scheduled", false)
     .gte("generated_at", startOfMonth.toISOString())
     .neq("status", "failed")
     .or(NOT_PARTIAL);
@@ -484,6 +494,7 @@ async function getMonthlyResearchUsage(userId: string, periodStart: Date): Promi
     .from("research_runs")
     .select("id", { count: "exact", head: true })
     .eq("user_id", userId)
+    .eq("scheduled", false)
     .gte("generated_at", periodStart.toISOString())
     .neq("status", "failed")
     .or(NOT_PARTIAL);
@@ -504,6 +515,7 @@ async function getLifetimeFreeResearchUsage(userId: string): Promise<number> {
     .select("id", { count: "exact", head: true })
     .eq("user_id", userId)
     .eq("tier", "free")
+    .eq("scheduled", false)
     .neq("status", "failed")
     .or(NOT_PARTIAL);
   if (error) {
@@ -762,18 +774,27 @@ app.post("/research", async (req, res) => {
     return tierDenied(res, "Your trial has ended. Contact us to continue using Metis.", "Contact support@metisanalytic.com to discuss plans.", { userId, cap: "trial_expired" });
   }
 
+  // A weekly refresh of a saved account (account pipeline). Only this
+  // process's own scheduler knows the token, so the web app can't mark a
+  // run as scheduled. Scheduled runs skip the plan caps and burst limits
+  // and are left out of every usage count (research_runs.scheduled).
+  const scheduled = type === "company" && req.get("x-scheduled-run") === SCHEDULED_RUN_TOKEN;
+  if (scheduled && !config.accountsAccess) {
+    return tierDenied(res, "Account refreshes aren't on this plan.", undefined, { userId, cap: "accounts_access" });
+  }
+
   // Task 3.1 — hourly burst throttle, checked before any entitlement
   // logic below (cheapest check, and "slow down" is a different signal
   // from "you're out of quota"). Per-account first (tier-aware), then a
   // flat per-IP ceiling as defense-in-depth against one IP cycling
   // through many accounts to route around the per-account limit.
-  const accountLimit = checkHourlyBucket(`research:user:${userId}`, config.hourlyResearchLimit);
+  const accountLimit = scheduled ? { allowed: true, resetInMs: 0 } : checkHourlyBucket(`research:user:${userId}`, config.hourlyResearchLimit);
   if (!accountLimit.allowed) {
     return rateLimited(res, `You're researching faster than your plan allows. Try again in ${Math.ceil(accountLimit.resetInMs / 60000)} minutes.`, { userId, cap: "hourly_research_account" });
   }
   const ip = clientIp(req);
   // Internal is exempt, as from every other limit in this file.
-  const ipLimit = ip && tier !== "internal" ? checkHourlyBucket(`research:ip:${ip}`, RATE_LIMIT_PER_IP_PER_HOUR) : { allowed: true, resetInMs: 0 };
+  const ipLimit = ip && tier !== "internal" && !scheduled ? checkHourlyBucket(`research:ip:${ip}`, RATE_LIMIT_PER_IP_PER_HOUR) : { allowed: true, resetInMs: 0 };
   if (!ipLimit.allowed) {
     return rateLimited(res, `Too many requests from this network. Try again in ${Math.ceil(ipLimit.resetInMs / 60000)} minutes.`, { userId, cap: "hourly_research_ip" });
   }
@@ -827,6 +848,7 @@ app.post("/research", async (req, res) => {
   let reserved: boolean;
   try {
     reserved = await withUserLock(userId, async () => {
+      if (!scheduled) {
       if (config.windowResearchLimit !== -1) {
         const window = await getUsageWindow(userId);
         if (window.resetsAt && window.research >= config.windowResearchLimit) {
@@ -883,6 +905,8 @@ app.post("/research", async (req, res) => {
         }
       }
 
+      }
+
       // The pending row is the reservation, and also lets the web app
       // resume showing progress after a reload (the research keeps running
       // regardless of client disconnect). Without it the run would go
@@ -898,6 +922,7 @@ app.post("/research", async (req, res) => {
         // stays accurate for duration-by-plan analysis even after an
         // upgrade/downgrade (task 2.3), and scopes Free's lifetime cap.
         tier,
+        scheduled,
       });
       if (pendingError) {
         console.error("[research] Failed to insert pending run:", JSON.stringify(pendingError));
@@ -1055,6 +1080,14 @@ app.post("/research", async (req, res) => {
     }
 
     res.json({ ok: true, runId, reportPath: outPath, tier, charon: config.charonProtocol });
+
+    // Account pipeline: what changed since the last report on a saved
+    // account. After the response, so it never delays or fails the run.
+    if (type === "company" && !(bundle as { partial?: boolean }).partial) {
+      recordAccountTriggers(supabase, { userId, runId, subject, bundle: bundle as ResearchBundle })
+        .then((n) => { if (n) console.log(`[accounts] run ${runId}: ${n} trigger(s)`); })
+        .catch((err) => console.error(`[accounts] run ${runId}: triggers failed:`, err instanceof Error ? err.message : err));
+    }
 
     // Provenance (Feature 2): store the raw responses and findings behind
     // this report. Runs after the response so it never delays or fails it.
@@ -1956,4 +1989,39 @@ app.post("/email/unsubscribe", async (req, res) => {
 app.listen(PORT, () => {
   console.log(`SELINE Agent Server running on port ${PORT}`);
   logProviderConfig();
+  if (isEnabled("account_refresh")) startAccountRefresh();
 });
+
+/**
+ * Weekly refresh of saved accounts (account pipeline). Every 10 minutes,
+ * one due account is claimed and re-run through this server's own
+ * /research route, marked with the in-memory token so it skips the plan
+ * caps. One at a time, so refreshes never crowd out users' own searches.
+ * Off unless FEATURE_ACCOUNT_REFRESH=on.
+ */
+function startAccountRefresh() {
+  const TICK_MS = 10 * 60_000;
+  let busy = false;
+  const allowed = async (userId: string) => getTierConfig(await getUserTier(userId)).accountsAccess;
+  const tick = async () => {
+    if (busy) return;
+    busy = true;
+    try {
+      const due = await claimDueAccount(supabase, allowed);
+      if (!due) return;
+      console.log(`[accounts] refreshing account ${due.id}`);
+      const res = await fetch(`http://127.0.0.1:${PORT}/research`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-agent-secret": AGENT_SECRET ?? "", "x-scheduled-run": SCHEDULED_RUN_TOKEN },
+        body: JSON.stringify({ subject: due.company, type: "company", userId: due.userId }),
+      });
+      if (!res.ok) console.error(`[accounts] refresh of ${due.id} returned ${res.status}`);
+    } catch (err) {
+      console.error("[accounts] refresh tick failed:", err instanceof Error ? err.message : err);
+    } finally {
+      busy = false;
+    }
+  };
+  setInterval(() => { void tick(); }, TICK_MS);
+  console.log("[accounts] weekly account refresh on");
+}

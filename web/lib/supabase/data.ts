@@ -36,6 +36,8 @@ export async function getPendingRunForUser() {
     .from("research_runs")
     .select("id, type, subject, generated_at, bundle")
     .eq("status", "pending")
+    // A weekly account refresh runs in the background; it isn't the user's search.
+    .eq("scheduled", false)
     .order("generated_at", { ascending: false })
     .limit(1);
   if (error) throw error;

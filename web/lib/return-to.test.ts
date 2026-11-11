@@ -15,6 +15,7 @@ test("safeNext refuses anything that leaves the site", () => {
 
 test("private paths match whole segments only", () => {
   assert.equal(isPrivatePath("/reports"), true);
+  assert.equal(isPrivatePath("/accounts"), true);
   assert.equal(isPrivatePath("/api/research"), true);
   assert.equal(isPrivatePath("/reportsabc"), false);
   assert.equal(isPrivatePath("/pricing"), false);
