@@ -609,6 +609,8 @@ export interface FederalSpendingEntry {
   awardingAgency?: string;
   amount?: string;
   date?: string;
+  /** Period of performance end ("End Date"), as USAspending gives it. */
+  endDate?: string;
   awardType?: string;   // "Contract" | "Grant" | "IDV" etc
   description?: string;
 }
