@@ -43,6 +43,7 @@ import { welcomeEmail, capReachedEmail } from "../src/lib/email/copy.js";
 import { createClient } from "@supabase/supabase-js";
 import { BUILD_ID } from "../src/lib/build.js";
 import { claimDueAccount, recordAccountTriggers } from "../src/lib/account-pipeline.js";
+import { PULL_INTERVAL_HOURS, pullSamOpportunities } from "../src/lib/sam-gov.js";
 import { isEnabled } from "../src/lib/flags.js";
 import type { ResearchBundle } from "../src/types/research.js";
 
@@ -1084,7 +1085,7 @@ app.post("/research", async (req, res) => {
     // Account pipeline: what changed since the last report on a saved
     // account. After the response, so it never delays or fails the run.
     if (type === "company" && !(bundle as { partial?: boolean }).partial) {
-      recordAccountTriggers(supabase, { userId, runId, subject, bundle: bundle as ResearchBundle })
+      recordAccountTriggers(supabase, { userId, runId, subject, bundle: bundle as ResearchBundle, intent: isEnabled("buyer_intent") })
         .then((n) => { if (n) console.log(`[accounts] run ${runId}: ${n} trigger(s)`); })
         .catch((err) => console.error(`[accounts] run ${runId}: triggers failed:`, err instanceof Error ? err.message : err));
     }
@@ -1990,7 +1991,42 @@ app.listen(PORT, () => {
   console.log(`SELINE Agent Server running on port ${PORT}`);
   logProviderConfig();
   if (isEnabled("account_refresh")) startAccountRefresh();
+  if (isEnabled("buyer_intent")) startSamPull();
 });
+
+/**
+ * Daily SAM.gov pull for buyer intent's "Shopping now" list. Checks hourly;
+ * pullSamOpportunities skips unless the last saved pull is PULL_INTERVAL_HOURS
+ * old, and a failed or empty pull waits the same interval here, so the API's
+ * daily request cap is never spent on retries. Off unless
+ * FEATURE_BUYER_INTENT=on and SAM_GOV_API_KEY is set.
+ */
+function startSamPull() {
+  const apiKey = process.env.SAM_GOV_API_KEY?.trim();
+  if (!apiKey) {
+    console.warn("[sam-gov] FEATURE_BUYER_INTENT is on but SAM_GOV_API_KEY isn't set; no SAM.gov pull");
+    return;
+  }
+  let busy = false;
+  let lastAttempt = 0;
+  const tick = async () => {
+    if (busy || Date.now() - lastAttempt < PULL_INTERVAL_HOURS * 3_600_000) return;
+    busy = true;
+    lastAttempt = Date.now();
+    try {
+      const r = await pullSamOpportunities(supabase, apiKey);
+      console.log(r.skipped ? `[sam-gov] skipped: ${r.skipped}` : `[sam-gov] pulled ${r.fetched} notice(s), kept ${r.kept}, removed ${r.removed}`);
+      if (r.skipped) lastAttempt = 0; // Someone else pulled; check again next hour.
+    } catch (err) {
+      console.error("[sam-gov] pull failed:", err instanceof Error ? err.message : err);
+    } finally {
+      busy = false;
+    }
+  };
+  void tick();
+  setInterval(() => { void tick(); }, 60 * 60_000);
+  console.log("[sam-gov] daily SAM.gov pull on");
+}
 
 /**
  * Weekly refresh of saved accounts (account pipeline). Every 10 minutes,

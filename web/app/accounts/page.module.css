@@ -174,3 +174,8 @@
   .dealForm { grid-template-columns: 1fr; }
   .stallSetting { margin-left: 0; }
 }
+/* ── Buyer intent ───────────────────────────────────────────── */
+.intentBadge { background: transparent; cursor: pointer; }
+.intent_high { color: var(--orange); border: 1px solid var(--orange); }
+.intent_medium { color: var(--cyan); border: 1px solid var(--cyan); }
+.intent_low { color: var(--muted); border: 1px solid var(--border); }

@@ -958,3 +958,52 @@ CREATE POLICY "Users manage own pipeline settings"
   USING (auth.uid() = user_id)
   WITH CHECK (auth.uid() = user_id);
 REVOKE ALL ON pipeline_settings FROM anon;
+
+
+-- ============================================================
+-- Buyer intent v1 (ABM brief, Nov 2026)
+-- Apply BEFORE deploying: the "What you sell" route reads and writes the
+-- seller_offers columns, and the accounts list reads accounts.intent_signals.
+-- ============================================================
+
+-- The seller's category, for matching SAM.gov opportunities: NAICS codes
+-- (2 to 6 digits; a shorter code matches every code under it) and title
+-- keywords. Owner-editable like the rest of the offer.
+ALTER TABLE seller_offers ADD COLUMN IF NOT EXISTS naics_codes TEXT[] NOT NULL DEFAULT '{}';
+ALTER TABLE seller_offers ADD COLUMN IF NOT EXISTS keywords    TEXT[] NOT NULL DEFAULT '{}';
+ALTER TABLE seller_offers DROP CONSTRAINT IF EXISTS seller_offers_naics_codes_check;
+ALTER TABLE seller_offers ADD CONSTRAINT seller_offers_naics_codes_check
+  CHECK (cardinality(naics_codes) <= 5 AND array_to_string(naics_codes, ',') ~ '^([0-9]{2,6}(,[0-9]{2,6})*)?$');
+ALTER TABLE seller_offers DROP CONSTRAINT IF EXISTS seller_offers_keywords_check;
+ALTER TABLE seller_offers ADD CONSTRAINT seller_offers_keywords_check
+  CHECK (cardinality(keywords) <= 10 AND char_length(array_to_string(keywords, ',')) <= 500);
+
+-- Buying signals found in an account's reports (contract end dates, stated
+-- plans in the news, DNS-backed tech stack changes), each cited. Written by
+-- the agent server when a report on the account finishes; accounts stays
+-- read-only to its owner. The level is worked out at read time, since
+-- "ends in 5 months" and open solicitations change with the date.
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS intent_signals JSONB;
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS intent_updated_at TIMESTAMPTZ;
+
+-- Open federal opportunities from the SAM.gov Get Opportunities API,
+-- refreshed once a day by the agent server (FEATURE_BUYER_INTENT, needs
+-- SAM_GOV_API_KEY). Public data, but served only through the web app's
+-- plan-checked routes, so no policies: service role only.
+CREATE TABLE IF NOT EXISTS sam_opportunities (
+  notice_id          TEXT        PRIMARY KEY,
+  title              TEXT        NOT NULL,
+  solicitation_number TEXT,
+  notice_type        TEXT        NOT NULL,
+  agency_path        TEXT        NOT NULL,
+  naics_code         TEXT,
+  set_aside          TEXT,
+  posted_date        DATE        NOT NULL,
+  response_deadline  TIMESTAMPTZ,
+  url                TEXT        NOT NULL,
+  fetched_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS sam_opportunities_naics ON sam_opportunities (naics_code text_pattern_ops);
+CREATE INDEX IF NOT EXISTS sam_opportunities_deadline ON sam_opportunities (response_deadline);
+ALTER TABLE sam_opportunities ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON sam_opportunities FROM anon, authenticated;

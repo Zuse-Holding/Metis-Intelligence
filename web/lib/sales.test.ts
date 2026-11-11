@@ -105,7 +105,7 @@ test("competitor matching is whole-word, either way round", () => {
 
 test("seller offer: trims, dedupes competitors and enforces limits", () => {
   const ok = parseSellerOffer({ offering: "  Cuts AP time  ", targetCustomers: "Distributors", competitors: ["HubSpot", " hubspot ", "", "Salesforce"] });
-  assert.deepEqual(ok, { ok: true, offer: { offering: "Cuts AP time", targetCustomers: "Distributors", competitors: ["HubSpot", "Salesforce"] } });
+  assert.deepEqual(ok, { ok: true, offer: { offering: "Cuts AP time", targetCustomers: "Distributors", competitors: ["HubSpot", "Salesforce"], naicsCodes: [], keywords: [] } });
   assert.equal(parseSellerOffer(null).ok, false);
   assert.equal(parseSellerOffer({ offering: "", targetCustomers: "", competitors: [] }).ok, false);
   assert.equal(parseSellerOffer({ offering: "x".repeat(301), targetCustomers: "", competitors: [] }).ok, false);
@@ -113,8 +113,19 @@ test("seller offer: trims, dedupes competitors and enforces limits", () => {
   assert.equal(parseSellerOffer({ offering: "x", targetCustomers: "", competitors: Array.from({ length: 21 }, (_, i) => `V${i}`) }).ok, false);
 });
 
+test("seller offer: NAICS codes and keywords are optional, deduped and validated", () => {
+  const base = { offering: "x", targetCustomers: "", competitors: [] };
+  const ok = parseSellerOffer({ ...base, naicsCodes: ["541512", " 5415 ", "541512", ""], keywords: ["Fleet telematics", "fleet TELEMATICS", "GPS/AVL"] });
+  assert.deepEqual(ok.ok && [ok.offer.naicsCodes, ok.offer.keywords], [["541512", "5415"], ["Fleet telematics", "GPS/AVL"]]);
+  assert.equal(parseSellerOffer({ ...base, naicsCodes: ["5"] }).ok, false);
+  assert.equal(parseSellerOffer({ ...base, naicsCodes: ["5415123"] }).ok, false);
+  assert.equal(parseSellerOffer({ ...base, naicsCodes: ["11", "21", "22", "23", "31", "42"] }).ok, false);
+  assert.equal(parseSellerOffer({ ...base, keywords: ["fleet,name.ilike.*"] }).ok, false);
+  assert.equal(parseSellerOffer({ ...base, keywords: Array.from({ length: 11 }, (_, i) => `k${i}`) }).ok, false);
+});
+
 test("the outreach brief has every section with links and marks competitors first", () => {
-  const text = outreachBrief("Acme · acme.com", BUNDLE, { offering: "Cuts AP time", competitors: ["Dropbox"], targetCustomers: "" }, NOW);
+  const text = outreachBrief("Acme · acme.com", BUNDLE, { offering: "Cuts AP time", competitors: ["Dropbox"], targetCustomers: "", naicsCodes: [], keywords: [] }, NOW);
   assert.match(text, /^Acme · acme\.com — account brief \(Metis Intelligence, Nov 10, 2026\)/);
   assert.match(text, /Why now:\n- Oct 3, 2026: Acme opens Denver plant \(https:\/\/news\.example\/a\)/);
   assert.match(text, /Tech stack:\n- Dropbox \(Collaboration\) — a competitor you replace: /);

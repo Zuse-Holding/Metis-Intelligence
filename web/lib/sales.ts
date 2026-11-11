@@ -47,12 +47,21 @@ export interface SellerOffer {
   competitors: string[];
   /** Who you sell to (industry, size, buyer role). */
   targetCustomers: string;
+  /** NAICS codes for SAM.gov matching (buyer intent); 2 to 6 digits. */
+  naicsCodes: string[];
+  /** Words to find in SAM.gov notice titles (buyer intent). */
+  keywords: string[];
 }
 
 export const MAX_OFFERING = 300;
 export const MAX_TARGET = 300;
 export const MAX_COMPETITORS = 20;
 export const MAX_COMPETITOR_NAME = 80;
+export const MAX_NAICS = 5;
+export const MAX_KEYWORDS = 10;
+export const MAX_KEYWORD = 40;
+/** Letters, digits, spaces, & / and -: also keeps keywords safe inside a PostgREST filter. */
+const KEYWORD_RE = /^[a-z0-9][a-z0-9 &/-]*$/i;
 
 const oneLine = (s: string) => s.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
 
@@ -77,7 +86,33 @@ export function parseSellerOffer(body: unknown): { ok: true; offer: SellerOffer 
     if (!competitors.some((x) => x.toLowerCase() === name.toLowerCase())) competitors.push(name);
   }
   if (competitors.length > MAX_COMPETITORS) return { ok: false, error: `List at most ${MAX_COMPETITORS} competitors.` };
-  return { ok: true, offer: { offering, competitors, targetCustomers } };
+
+  // Optional: older clients don't send them.
+  const naicsCodes: string[] = [];
+  if (b.naicsCodes !== undefined) {
+    if (!Array.isArray(b.naicsCodes)) return { ok: false, error: "NAICS codes must be a list." };
+    for (const c of b.naicsCodes) {
+      const code = typeof c === "string" ? c.trim() : typeof c === "number" ? String(c) : "";
+      if (!code) continue;
+      if (!/^\d{2,6}$/.test(code)) return { ok: false, error: "A NAICS code is 2 to 6 digits, e.g. 541512." };
+      if (!naicsCodes.includes(code)) naicsCodes.push(code);
+    }
+  }
+  if (naicsCodes.length > MAX_NAICS) return { ok: false, error: `List at most ${MAX_NAICS} NAICS codes.` };
+  const keywords: string[] = [];
+  if (b.keywords !== undefined) {
+    if (!Array.isArray(b.keywords)) return { ok: false, error: "Keywords must be a list." };
+    for (const k of b.keywords) {
+      if (typeof k !== "string") return { ok: false, error: "Keywords must be words." };
+      const word = oneLine(k);
+      if (!word) continue;
+      if (word.length > MAX_KEYWORD) return { ok: false, error: `A keyword can be at most ${MAX_KEYWORD} characters.` };
+      if (!KEYWORD_RE.test(word)) return { ok: false, error: "Keywords can use letters, numbers, spaces, & / and -." };
+      if (!keywords.some((x) => x.toLowerCase() === word.toLowerCase())) keywords.push(word);
+    }
+  }
+  if (keywords.length > MAX_KEYWORDS) return { ok: false, error: `List at most ${MAX_KEYWORDS} keywords.` };
+  return { ok: true, offer: { offering, competitors, targetCustomers, naicsCodes, keywords } };
 }
 
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();

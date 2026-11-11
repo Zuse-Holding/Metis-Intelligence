@@ -1,12 +1,14 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ResearchBundle } from "../types/research.js";
 import { detectTriggers } from "./account-triggers.js";
+import { intentSignals, parseIntentSignals } from "./buyer-intent.js";
 
 /**
  * Agent-server side of the account pipeline (ABM brief §4):
  *   - recordAccountTriggers: after a company report finishes, compare it with
  *     the previous report on the same subject and save what changed against
- *     every saved account with that subject.
+ *     every saved account with that subject. With `intent` on (buyer intent
+ *     v1), also store the report's buying signals on those accounts.
  *   - Weekly refresh: pick saved accounts whose latest report is a week old
  *     and claim them, so the server can re-run them off the plan limits.
  * Service-role client only: users can read account_triggers but not write it.
@@ -19,12 +21,15 @@ const likeExact = (s: string) => s.replace(/[\\%_]/g, (c) => `\\${c}`);
 
 export async function recordAccountTriggers(
   supabase: SupabaseClient,
-  args: { userId: string; runId: string; subject: string; bundle: ResearchBundle },
+  args: { userId: string; runId: string; subject: string; bundle: ResearchBundle; intent?: boolean },
 ): Promise<number> {
   const { userId, runId, subject, bundle } = args;
-  const { data: accounts, error } = await supabase
-    .from("accounts")
-    .select("id, company")
+  // intent_signals only when buyer intent is on, so the flag off reads
+  // exactly what it did before the column existed.
+  const accountsQuery = args.intent
+    ? supabase.from("accounts").select("id, company, intent_signals")
+    : supabase.from("accounts").select("id, company");
+  const { data: accounts, error } = await accountsQuery
     .eq("user_id", userId)
     .ilike("company", likeExact(subject));
   if (error) throw new Error(`accounts lookup: ${error.message}`);
@@ -45,6 +50,23 @@ export async function recordAccountTriggers(
     .limit(1);
   if (prevErr) throw new Error(`previous run lookup: ${prevErr.message}`);
   const prev = prevRuns?.[0];
+
+  // Buying signals, first report included: contract end dates and stated
+  // plans don't need a previous report; tech changes do. A failure here is
+  // logged and never stops the triggers below.
+  if (args.intent) {
+    const now = new Date();
+    for (const a of matching) {
+      const signals = intentSignals(bundle, prev?.bundle as ResearchBundle | undefined, parseIntentSignals((a as { intent_signals?: unknown }).intent_signals), now);
+      const { error: upErr } = await supabase
+        .from("accounts")
+        .update({ intent_signals: signals, intent_updated_at: now.toISOString() })
+        .eq("id", a.id)
+        .eq("user_id", userId);
+      if (upErr) console.error(`[accounts] saving intent signals for ${a.id}: ${upErr.message}`);
+    }
+  }
+
   if (!prev?.bundle) return 0; // First report on this account: the baseline.
 
   const { data: offer } = await supabase.from("seller_offers").select("competitors").eq("user_id", userId).maybeSingle();

@@ -14,6 +14,9 @@ import {
   type FindingLike,
   type Health,
 } from "../accounts";
+import { isEnabled } from "../flags";
+import { isPostingAgency, scoreIntent, type Intent, type IntentSignal } from "../intent";
+import { openOpportunities, sellerCategory } from "./intent";
 
 /**
  * Account pipeline data layer. Reads go through the signed-in user's client
@@ -52,6 +55,8 @@ export interface Account {
   freshTriggers: number;
   health: Health;
   healthReasons: string[];
+  /** Buyer intent, with every reason cited. Absent while the feature is off. */
+  intent?: Intent;
 }
 
 export type AccessResult =
@@ -101,6 +106,7 @@ interface AccountRow {
   stage_changed_at: string;
   created_at: string;
   updated_at: string;
+  intent_signals?: unknown;
 }
 
 interface RunRow {
@@ -140,15 +146,28 @@ export async function setStallDays(userId: string, stallDays: number): Promise<v
   if (error) throw error;
 }
 
+const ACCOUNT_COLUMNS = "id, company, stage, owner, notes, deal_value, next_step, stage_changed_at, created_at, updated_at";
+
+/** Stored signals as read back from JSONB; anything malformed is dropped. */
+function storedSignals(value: unknown): IntentSignal[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((v): v is IntentSignal =>
+    !!v && typeof v === "object"
+    && ["contract_ending", "stated_plan", "tech_change"].includes((v as IntentSignal).kind)
+    && typeof (v as IntentSignal).title === "string"
+    && typeof (v as IntentSignal).url === "string" && /^https?:\/\//.test((v as IntentSignal).url)
+    && typeof (v as IntentSignal).date === "string");
+}
+
 /** Accounts with their latest report, triggers and health, ranked: work the top first. */
 export async function listAccounts(userId: string, now = new Date()): Promise<{ accounts: Account[]; stallDays: number }> {
   const supabase = await createServerSupabaseClient();
   const since = new Date(now.getTime() - TRIGGER_LOOKBACK_DAYS * 86_400_000).toISOString();
-  const [{ data, error }, runs, stallDays, { data: triggerRows, error: tErr }] = await Promise.all([
-    supabase
-      .from("accounts")
-      .select("id, company, stage, owner, notes, deal_value, next_step, stage_changed_at, created_at, updated_at")
-      .eq("user_id", userId),
+  const intentOn = isEnabled("buyer_intent");
+  const [{ data, error }, runs, stallDays, { data: triggerRows, error: tErr }, opportunities] = await Promise.all([
+    intentOn
+      ? supabase.from("accounts").select(`${ACCOUNT_COLUMNS}, intent_signals`).eq("user_id", userId)
+      : supabase.from("accounts").select(ACCOUNT_COLUMNS).eq("user_id", userId),
     companyRuns(userId),
     getStallDays(userId),
     supabase
@@ -157,6 +176,13 @@ export async function listAccounts(userId: string, now = new Date()): Promise<{ 
       .eq("user_id", userId)
       .gte("detected_at", since)
       .order("detected_at", { ascending: false }),
+    // A SAM.gov lookup failure drops only the solicitation reasons, not the list.
+    intentOn
+      ? sellerCategory(userId).then((c) => openOpportunities(c, now)).catch((err) => {
+          console.error("[accounts] open solicitations lookup failed:", err);
+          return [];
+        })
+      : Promise.resolve([]),
   ]);
   if (error) throw error;
   if (tErr) throw tErr;
@@ -203,6 +229,13 @@ export async function listAccounts(userId: string, now = new Date()): Promise<{ 
       freshTriggers: freshTriggerCount(triggers, now),
       health,
       healthReasons: reasons,
+      ...(intentOn ? {
+        intent: scoreIntent(
+          storedSignals(row.intent_signals),
+          opportunities.filter((o) => isPostingAgency(row.company, o.agencyPath)),
+          now,
+        ),
+      } : {}),
     };
   });
   return { accounts: rankAccounts(accounts), stallDays };

@@ -7,6 +7,7 @@ import { useResearch } from "../lib/research-context";
 import { useTier } from "../lib/tier-context";
 import { BUSINESS_INTELLIGENCE_PATH, DILIGENCE_URL } from "../lib/products";
 import { upgradeTarget, usageRows } from "../lib/usage";
+import { isEnabled } from "../lib/flags";
 import { Spinner } from "./Skeleton";
 import styles from "./Sidebar.module.css";
 
@@ -17,6 +18,8 @@ const NAV = [
   { label: "Reports",         icon: "⊞", href: "/reports" },
   { label: "Watchlist",       icon: "◎", href: "/watchlist" },
   { label: "Accounts",        icon: "▤", href: "/accounts" },
+  // Buyer intent v1; NEXT_PUBLIC_FEATURE_BUYER_INTENT is baked in at build time.
+  ...(isEnabled("buyer_intent") ? [{ label: "Shopping now", icon: "◇", href: "/shopping-now" }] : []),
 ];
 
 
