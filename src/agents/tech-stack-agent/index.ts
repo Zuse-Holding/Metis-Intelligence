@@ -19,12 +19,15 @@ import { CATEGORY_ORDER, VENDORS, mailMatches, mailRecords, type IpProvider, typ
  */
 
 export type Confidence = "confirmed" | "likely";
-export type Layer = "dns" | "website";
+/** "subdomain": found through the company's subdomains in certificate logs,
+ *  which depend on a log service answering (so triggers skip them when it didn't). */
+export type Layer = "dns" | "website" | "subdomain";
 
 export interface TechItem {
   vendor: string;
   category: TechCategory;
-  /** Phase 1 signals are all direct records or tags, so "confirmed". */
+  /** "confirmed" when a record or tag names the vendor; "likely" when only
+   *  a subdomain's name suggests it (jira.acme.com). */
   confidence: Confidence;
   layer: Layer;
   /** The record or tag it came from, e.g. "SPF include: _spf.salesforce.com". */
@@ -39,6 +42,8 @@ export interface TechStack {
   items: TechItem[];
   /** Why the homepage couldn't be read, when it couldn't. DNS still counts. */
   websiteUnavailable?: string;
+  /** True when certificate logs answered, so subdomain items are complete. */
+  subdomainsChecked?: boolean;
 }
 
 /** Everything the detector reads. Each field undefined = not gathered. */
@@ -49,8 +54,12 @@ export interface TechSignals {
   mx?: string[];
   txt?: string[];
   ns?: string[];
-  /** CNAME chains, e.g. { host: "www.acme.com", targets: ["acme.netlify.app"] }. */
-  cnames?: { host: string; targets: string[] }[];
+  /** CNAME chains, e.g. { host: "www.acme.com", targets: ["acme.netlify.app"] }.
+   *  `fromLogs` marks hosts found through certificate logs. */
+  cnames?: { host: string; targets: string[]; fromLogs?: boolean }[];
+  /** The company's own subdomains from certificate logs, and where they came from. */
+  subdomains?: string[];
+  subdomainSource?: { name: string; url: string };
   /** The site's addresses and which published cloud range holds each. */
   ips?: { host: string; ip: string; provider?: IpProvider }[];
   /** Response headers, names lower-cased. */
@@ -115,9 +124,14 @@ function firstMatch(signal: Signal, s: TechSignals): Omit<TechItem, "vendor" | "
     case "cname": {
       for (const c of s.cnames ?? []) {
         const hit = c.targets.find((t) => signal.re.test(t));
-        if (hit) return { layer: "dns", evidence: `CNAME: ${c.host} → ${hit}`, sourceName: "Public DNS (CNAME)", sourceUrl: dohUrl(c.host, "CNAME") };
+        if (hit) return { layer: c.fromLogs ? "subdomain" : "dns", evidence: `CNAME: ${c.host} → ${hit}`, sourceName: "Public DNS (CNAME)", sourceUrl: dohUrl(c.host, "CNAME") };
       }
       return undefined;
+    }
+    case "subdomain": {
+      const hit = (s.subdomains ?? []).find((h) => subdomainWords(h, s.domain).some((w) => signal.re.test(w)));
+      if (!hit || !s.subdomainSource) return undefined;
+      return { layer: "subdomain", evidence: `Subdomain: ${hit} (certificate logs)`, sourceName: s.subdomainSource.name, sourceUrl: s.subdomainSource.url };
     }
     case "ip": {
       const hit = (s.ips ?? []).find((a) => a.provider === signal.provider);
@@ -148,22 +162,125 @@ function firstMatch(signal: Signal, s: TechSignals): Omit<TechItem, "vendor" | "
  */
 export function detectTechStack(s: TechSignals): TechItem[] {
   const items: TechItem[] = [];
+  // A subdomain that fronts a hosted service runs on that vendor's
+  // infrastructure, not the company's: Patagonia's email images sit on
+  // Salesforce's CloudFront, its B2B portal on a vendor's Cloudflare. So
+  // hosting, CDN and DNS vendors don't count from those subdomains.
+  const hostedElsewhere = new Set((s.cnames ?? []).filter((c) => c.fromLogs && (
+    c.targets.some((t) => onSomeoneElsesCloudflare(t, s.domain))
+    || VENDORS.some((v) => !INFRA.has(v.category) && v.signals.some((sig) => sig.kind === "cname" && c.targets.some((t) => sig.re.test(t))))
+  )).map((c) => c.host));
+  const infraView: TechSignals = { ...s, cnames: (s.cnames ?? []).filter((c) => !hostedElsewhere.has(c.host)) };
   for (const v of VENDORS) {
-    // DNS signals first: a record is stronger evidence than a page tag.
-    const ordered = [...v.signals].sort((a, b) => Number(isPageSignal(a)) - Number(isPageSignal(b)));
+    const view = INFRA.has(v.category) ? infraView : s;
+    // Strongest evidence first: records, then page tags, then a subdomain's name.
+    const ordered = [...v.signals].sort((a, b) => signalRank(a) - signalRank(b));
     for (const signal of ordered) {
-      const hit = firstMatch(signal, s);
+      const hit = firstMatch(signal, view);
       if (hit) {
-        items.push({ vendor: v.vendor, category: v.category, confidence: "confirmed", ...hit });
+        items.push({ vendor: v.vendor, category: v.category, confidence: signal.kind === "subdomain" ? "likely" : "confirmed", ...hit });
         break;
       }
     }
   }
   const rank = (c: TechCategory) => CATEGORY_ORDER.indexOf(c);
-  return items.sort((a, b) => rank(a.category) - rank(b.category));
+  return items.sort((a, b) => rank(a.category) - rank(b.category) || Number(a.confidence === "likely") - Number(b.confidence === "likely"));
 }
 
-const isPageSignal = (s: Signal) => s.kind === "header" || s.kind === "html";
+const INFRA = new Set<TechCategory>(["Hosting", "CDN and security", "DNS"]);
+/** "<name>.cdn.cloudflare.net" names the Cloudflare zone it belongs to:
+ *  "www.acme.com.cdn.cloudflare.net" is the company's own, while
+ *  "elasticsuite.com.cdn.cloudflare.net" is a vendor's (Cloudflare for SaaS). */
+function onSomeoneElsesCloudflare(target: string, domain: string): boolean {
+  const zone = target.toLowerCase().match(/^(.+)\.cdn\.cloudflare\.net$/)?.[1];
+  if (!zone || !zone.includes(".")) return false;
+  const d = domain.toLowerCase();
+  return zone !== d && !zone.endsWith(`.${d}`);
+}
+
+const signalRank = (s: Signal) => (s.kind === "subdomain" ? 2 : s.kind === "header" || s.kind === "html" ? 1 : 0);
+
+/** The words of a subdomain below the company's domain: "jira-qa.corp" -> ["jira", "qa", "corp"]. */
+export function subdomainWords(host: string, domain: string): string[] {
+  const h = host.toLowerCase();
+  const d = domain.toLowerCase();
+  if (!h.endsWith(`.${d}`)) return [];
+  return h.slice(0, -(d.length + 1)).split(/[.-]/).filter(Boolean);
+}
+
+// ── Certificate logs ─────────────────────────────────────────────────────────
+
+/** Names a certificate covers that are the company's own subdomains (not
+ *  the domain itself, not wildcards, not other companies on a shared
+ *  certificate), deduped and capped. */
+export function ownSubdomains(names: string[], domain: string, cap = 500): string[] {
+  const d = domain.toLowerCase();
+  const out = new Set<string>();
+  for (const raw of names) {
+    const n = raw.trim().toLowerCase().replace(/\.$/, "");
+    if (!n || n.startsWith("*") || n === d || !n.endsWith(`.${d}`) || !/^[a-z0-9.-]+$/.test(n)) continue;
+    out.add(n);
+    if (out.size >= cap) break;
+  }
+  return [...out].sort();
+}
+
+// First labels that commonly point at a hosted vendor (help.acme.com -> Zendesk).
+const VENDOR_HOST_LABELS = /^(help|helpcenter|support|status|docs|developer|developers|go|info|pages|lp|landing|careers|jobs|shop|store|email|em|e|click|links|link|track|tracking|image|view|news|community|learn|academy|events|event|portal|sso|login|auth|id|identity|kb|knowledge|blog|www2|cdn|assets|survey|feedback|book|meet|apply|hr|crm|marketing|mail)\d*$/;
+
+/**
+ * Which subdomains to look up for CNAMEs, at most `cap`: ones whose first
+ * label usually fronts a hosted service, then ones whose words match a
+ * vendor's subdomain pattern, then the rest, shortest first.
+ */
+export function subdomainsToResolve(subdomains: string[], domain: string, cap = 40): string[] {
+  const vendorWords = VENDORS.flatMap((v) => v.signals.filter((s) => s.kind === "subdomain").map((s) => (s as { re: RegExp }).re));
+  const score = (h: string) => {
+    const words = subdomainWords(h, domain);
+    if (words.length && VENDOR_HOST_LABELS.test(words[0])) return 0;
+    if (words.some((w) => vendorWords.some((re) => re.test(w)))) return 1;
+    return 2;
+  };
+  return [...subdomains].sort((a, b) => score(a) - score(b) || a.length - b.length || a.localeCompare(b)).slice(0, cap);
+}
+
+const CERT_TIMEOUT_MS = 20_000;
+
+/** The company's subdomains from crt.sh, then Cert Spotter if crt.sh fails. */
+async function certificateSubdomains(domain: string): Promise<{ names: string[]; source: { name: string; url: string } } | undefined> {
+  const crt = `https://crt.sh/?q=${encodeURIComponent(`%.${domain}`)}&output=json&exclude=expired&deduplicate=Y`;
+  try {
+    const res = await fetch(crt, { signal: AbortSignal.timeout(CERT_TIMEOUT_MS), headers: { accept: "application/json" } });
+    if (res.ok) {
+      const rows = (await res.json()) as { name_value?: string }[];
+      const names = rows.flatMap((r) => (r.name_value ?? "").split("\n"));
+      return { names: ownSubdomains(names, domain), source: { name: "Certificate logs (crt.sh)", url: `https://crt.sh/?q=${encodeURIComponent(`%.${domain}`)}` } };
+    }
+  } catch { /* fall through to Cert Spotter */ }
+  const spotter = `https://api.certspotter.com/v1/issuances?domain=${encodeURIComponent(domain)}&include_subdomains=true&expand=dns_names`;
+  try {
+    const key = process.env.CERTSPOTTER_API_KEY;
+    const res = await fetch(spotter, { signal: AbortSignal.timeout(CERT_TIMEOUT_MS), headers: key ? { authorization: `Bearer ${key}` } : {} });
+    if (!res.ok) return undefined;
+    const rows = (await res.json()) as { dns_names?: string[] }[];
+    return { names: ownSubdomains(rows.flatMap((r) => r.dns_names ?? []), domain), source: { name: "Certificate logs (Cert Spotter)", url: `https://sslmate.com/certspotter/` } };
+  } catch {
+    return undefined;
+  }
+}
+
+/** Runs `fn` over items with at most `limit` in flight. */
+async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await fn(items[i]);
+    }
+  }));
+  return out;
+}
 
 // ── Published cloud IP ranges ────────────────────────────────────────────────
 
@@ -305,7 +422,7 @@ const BOT_CHECK = /<title>\s*(one moment, please|just a moment|attention require
 export class TechStackAgent {
   async gather(domain: string, website?: string): Promise<TechSignals & { websiteUnavailable?: string }> {
     const hosts = [domain, `www.${domain}`];
-    const [mx, txt, ns, aApex, aWww, ranges, page] = await Promise.all([
+    const [mx, txt, ns, aApex, aWww, ranges, page, certs] = await Promise.all([
       settle(doh(domain, "MX")),
       settle(doh(domain, "TXT")),
       settle(doh(domain, "NS")),
@@ -313,7 +430,15 @@ export class TechStackAgent {
       settle(doh(hosts[1], "A")),
       cloudRanges(),
       fetchHomepage(website ?? `https://${domain}/`),
+      certificateSubdomains(domain),
     ]);
+
+    // Subdomains from certificate logs: where the likeliest ones point.
+    const subdomains = (certs?.names ?? []).filter((h) => h !== hosts[1]);
+    const logCnames = await mapLimit(subdomainsToResolve(subdomains, domain), 8, async (host) => {
+      const answers = await settle(doh(host, "A"));
+      return { host, targets: (answers ?? []).filter((a) => a.type === 5).map((a) => strip(a.data)), fromLogs: true };
+    });
 
     const cnames: TechSignals["cnames"] = [];
     const ips: NonNullable<TechSignals["ips"]> = [];
@@ -331,8 +456,10 @@ export class TechStackAgent {
       mx: mx?.filter((a) => a.type === 15).map((a) => strip(a.data)),
       txt: txt?.filter((a) => a.type === 16).map((a) => a.data.replace(/"\s*"/g, "").replace(/^"|"$/g, "")),
       ns: ns?.filter((a) => a.type === 2).map((a) => strip(a.data)),
-      cnames,
+      cnames: [...cnames, ...logCnames.filter((c) => c.targets.length > 0)],
       ips,
+      subdomains: certs ? subdomains : undefined,
+      subdomainSource: certs?.source,
     };
     if ("error" in page) {
       signals.websiteUnavailable = page.error;
@@ -351,7 +478,7 @@ export class TechStackAgent {
     if (nothingGathered) return { sources: [] };
     const checkedAt = new Date().toISOString();
     const items = detectTechStack(signals);
-    const stack: TechStack = { domain, checkedAt, items, websiteUnavailable: signals.websiteUnavailable };
+    const stack: TechStack = { domain, checkedAt, items, websiteUnavailable: signals.websiteUnavailable, subdomainsChecked: signals.subdomains !== undefined };
     const sources: Source[] = [...new Map(items.map((i) => [i.sourceUrl, i])).values()]
       .map((i) => ({ url: i.sourceUrl, title: i.sourceName, retrievedAt: checkedAt, usedFor: ["techstack"] }));
     return { stack, sources };

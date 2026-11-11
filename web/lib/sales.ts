@@ -214,7 +214,7 @@ export function outreachBrief(subject: string, b: SalesBundle, offer: SellerOffe
     const comp = offer?.competitors ?? [];
     const sorted = [...tools].sort((x, y) => Number(isCompetitor(y.vendor, comp)) - Number(isCompetitor(x.vendor, comp)));
     for (const t of sorted) {
-      lines.push(`- ${t.vendor} (${t.category})${isCompetitor(t.vendor, comp) ? " — a competitor you replace" : ""}: ${t.evidence} (${t.sourceUrl})`);
+      lines.push(`- ${t.vendor} (${t.category}${t.confidence === "likely" ? ", likely" : ""})${isCompetitor(t.vendor, comp) ? " — a competitor you replace" : ""}: ${t.evidence} (${t.sourceUrl})`);
     }
   }
   const people = contacts(b);

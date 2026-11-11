@@ -90,3 +90,6 @@
 .displaceHead { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; font-size: 13px; }
 .errorText { font-size: 12px; color: var(--red); margin: 0; }
 .gaps { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; line-height: 1.5; }
+
+.vendorLikely { border-style: dashed; }
+.likelyMark { color: var(--muted); font-size: 11px; }

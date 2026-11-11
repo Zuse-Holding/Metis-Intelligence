@@ -127,7 +127,14 @@ export function detectTriggers(prev: Bundle, next: Bundle, competitors: string[]
   // doesn't read as "dropped Google Tag Manager".
   if (prev.techStack && next.techStack) {
     const dnsOnly = !!prev.techStack.websiteUnavailable || !!next.techStack.websiteUnavailable;
-    const usable = (items: NonNullable<Bundle["techStack"]>["items"]) => (dnsOnly ? items.filter((i) => i.layer === "dns") : items);
+    // Subdomain finds never trigger: which subdomains the certificate logs
+    // return, and which get looked up, varies from run to run (Patagonia's
+    // Shopify store showed once, not the next time), so a change there
+    // isn't a change at the company.
+    const usable = (items: NonNullable<Bundle["techStack"]>["items"]) => items.filter((i) =>
+      i.confidence !== "likely"
+      && i.layer !== "subdomain"
+      && (!dnsOnly || i.layer !== "website"));
     const before = usable(prev.techStack.items);
     const after = usable(next.techStack.items);
     const had = new Set(before.map((i) => i.vendor));
