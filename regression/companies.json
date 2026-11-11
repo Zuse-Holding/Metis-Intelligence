@@ -11,7 +11,7 @@
       "mustFind": { "HQ Santa Monica": "Santa Monica", "$500M fund": "\\$500", "Coventry Square": "Coventry", "acquisition criteria": "criteria", "Form D": "Form D", "student-housing peers": "## Competitors\\n- " },
       "mustKeep": { "$100M fund target": "\\$100\\s?(M|million)", "Brian Benson": "Benson", "Mark Davidson": "Davidson", "summary correct": "## Executive Summary\\n(?![^\\n]*(Form D|\\$0 sold|\\bago\\)))[^\\n]*(Santa Monica)" } },
     { "name": "Graybar Electric Company", "website": "graybar.com",
-      "mustFind": { "$12.88B sales": "\\$12\\.88B", "asbestos caseload": "asbestos", "CEO Mazzarella": "Mazzarella", "board independence": "independen", "founded 1869": "1869", "peer Wesco": "Wesco", "peer Sonepar": "Sonepar" },
+      "mustFind": { "$12.88B sales": "\\$12\\.88B", "asbestos caseload": "asbestos", "CEO Mazzarella": "Mazzarella", "board independence": "independen", "founded 1869": "1869", "peer Wesco": "Wesco", "peer Sonepar": "Sonepar", "peer Rexel": "Rexel", "peer CED": "CED\\b|Consolidated Electrical" },
       "mustKeep": { "Blyden suit": "Blyden", "NLRB cases": "nlrb\\.gov/case", "SSA contract": "Social Security", "systems in use": "Systems in use", "DMARC reject": "p=reject", "summary correct": "## Executive Summary\\n(?![^\\n]*(K\\. ?M\\. Mazzarella|FY20(1\\d|20)\\b))[^\\n]*(1869)" } },
     { "name": "Gecko Robotics", "website": "geckorobotics.com",
       "mustFind": { "Series D $125M": "Series D", "Series C extension": "extension", "CEO title": "Loosararian[^\\n]*CEO", "President title": "Demmer[^\\n]*President", "robots in products": "## Products\\n- ", "ceiling vs obligated": "ceiling announced" },

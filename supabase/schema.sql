@@ -854,6 +854,15 @@ CREATE POLICY "Users manage own seller offer"
 
 REVOKE ALL ON seller_offers FROM anon;
 
+
+-- ============================================================
+-- Stable peer sets (ABM brief §3, Nov 2026)
+-- How often each competitor was found for a domain, across runs. Peers
+-- found in two or more runs stay in the report even when one run misses
+-- them. Apply before deploying: the profile save writes this column.
+-- ============================================================
+ALTER TABLE company_profiles ADD COLUMN IF NOT EXISTS peer_votes JSONB;
+
 -- Account pipeline (ABM brief §4, Nov 2026)
 -- A sales rep's list of target companies: stage, owner, notes. The latest
 -- report is looked up by subject at read time (not stored), so a re-run is

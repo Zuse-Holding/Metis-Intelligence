@@ -2,24 +2,67 @@
 import { useEffect, useMemo, useState } from "react";
 import EmptyState from "./EmptyState";
 import SellerOfferForm from "./SellerOfferForm";
+import { Spinner } from "./Skeleton";
 import { contacts, isCompetitor, outreachBrief, snapshot, whyNow, type SalesBundle, type SellerOffer } from "../lib/sales";
 import styles from "./SalesTab.module.css";
 
 interface Props {
   subject: string;
   bundle: SalesBundle | null | undefined;
+  /** The report's id: peer comparison reads the report on the server. */
+  runId?: string;
 }
+
+interface WeakSpot { kind: string; title: string; url: string; date: string; outlet?: string }
+interface PeerGap { vendor: string; category: string; of: number; peers: { name: string; evidence: string; url: string }[] }
+interface PeerResult { gaps: PeerGap[]; compared: { name: string; domain: string; tools: number }[]; skipped: string[]; reason?: string }
+
+const WEAK_SPOT_LABELS: Record<string, string> = {
+  price_increase: "Price increase", outage: "Outage", layoffs: "Layoffs", acquisition: "Acquisition",
+  sunset: "Product retired", security: "Security incident", lawsuit: "Lawsuit",
+};
+
+type Load<T> = { state: "idle" } | { state: "loading" } | { state: "error"; message: string } | { state: "done"; data: T };
 
 /**
  * A company report seen as a seller sees it: tech stack, why now, who to
  * contact and a short snapshot, all from the report's own cited data, plus
  * a "Copy for outreach" brief to paste into an email tool.
  */
-export default function SalesTab({ subject, bundle }: Props) {
+export default function SalesTab({ subject, bundle, runId }: Props) {
   const [offer, setOffer] = useState<SellerOffer | null>(null);
   const [offerLoaded, setOfferLoaded] = useState(false);
   const [editingOffer, setEditingOffer] = useState(false);
   const [copied, setCopied] = useState<"idle" | "done" | "failed">("idle");
+  const [spots, setSpots] = useState<Record<string, Load<WeakSpot[]>>>({});
+  const [peers, setPeers] = useState<Load<PeerResult>>({ state: "idle" });
+
+  async function post<T>(url: string, body: unknown): Promise<T> {
+    const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.error ?? "Try again shortly.");
+    return data as T;
+  }
+
+  async function loadSpots(vendor: string) {
+    setSpots((s) => ({ ...s, [vendor]: { state: "loading" } }));
+    try {
+      const data = await post<{ weakSpots: WeakSpot[] }>("/api/displacement/weak-spots", { vendor });
+      setSpots((s) => ({ ...s, [vendor]: { state: "done", data: data.weakSpots } }));
+    } catch (err) {
+      setSpots((s) => ({ ...s, [vendor]: { state: "error", message: err instanceof Error ? err.message : String(err) } }));
+    }
+  }
+
+  async function loadPeers() {
+    if (!runId) return;
+    setPeers({ state: "loading" });
+    try {
+      setPeers({ state: "done", data: await post<PeerResult>("/api/displacement/peers", { runId }) });
+    } catch (err) {
+      setPeers({ state: "error", message: err instanceof Error ? err.message : String(err) });
+    }
+  }
 
   useEffect(() => {
     fetch("/api/seller-offer", { cache: "no-store" })
@@ -94,6 +137,34 @@ export default function SalesTab({ subject, bundle }: Props) {
                 Runs {competitorsUsed.map((c) => c.vendor).join(", ")}, which you replace.
               </div>
             )}
+            {competitorsUsed.map((c) => {
+              const s = spots[c.vendor] ?? { state: "idle" as const };
+              return (
+                <div key={c.vendor} className={styles.displace}>
+                  <div className={styles.displaceHead}>
+                    <span>Why they might switch from <strong>{c.vendor}</strong></span>
+                    {s.state === "idle" && <button className={styles.linkBtn} onClick={() => loadSpots(c.vendor)}>Check the news</button>}
+                    {s.state === "loading" && <span className={styles.note}><Spinner size={10} /> Searching the news...</span>}
+                  </div>
+                  {s.state === "error" && <p className={styles.errorText}>{s.message}</p>}
+                  {s.state === "done" && (s.data.length === 0 ? (
+                    <EmptyState size="compact" title={`Nothing in the news about ${c.vendor} in the last two years`} when="Checked weekly" />
+                  ) : (
+                    <ul className={styles.events}>
+                      {s.data.map((w) => (
+                        <li key={w.url} className={styles.event}>
+                          <span className={styles.eventDate}>{w.date}</span>
+                          <span className={styles.eventKind}>{WEAK_SPOT_LABELS[w.kind] ?? w.kind}</span>
+                          <a href={w.url} target="_blank" rel="noopener noreferrer" className={styles.eventText}>
+                            {w.title}{w.outlet ? <span className={styles.eventSource}> · {w.outlet}</span> : null}
+                          </a>
+                        </li>
+                      ))}
+                    </ul>
+                  ))}
+                </div>
+              );
+            })}
             {stack.items.length === 0 ? (
               <EmptyState size="compact" title={`Nothing visible in ${stack.domain}'s public records`} when="Internal tools often leave no public trace" />
             ) : (
@@ -125,6 +196,40 @@ export default function SalesTab({ subject, bundle }: Props) {
           </>
         )}
       </section>
+
+      {/* Peer urgency */}
+      {stack && (b.competitors?.length ?? 0) >= 2 && runId && (
+        <section className={styles.section}>
+          <div className={styles.sectionHead}>
+            <h3 className={styles.sectionTitle}>What their peers use</h3>
+            {peers.state === "idle" && <button className={styles.linkBtn} onClick={loadPeers}>Compare with {Math.min(b.competitors!.length, 5)} peers</button>}
+          </div>
+          {peers.state === "loading" && <p className={styles.note}><Spinner size={10} /> Reading peers&apos; public records...</p>}
+          {peers.state === "error" && <p className={styles.errorText}>{peers.message}</p>}
+          {peers.state === "done" && (
+            <>
+              {peers.data.gaps.length === 0 ? (
+                <EmptyState size="compact" title="No tool that two or more peers use is missing here" when={null} />
+              ) : (
+                <ul className={styles.gaps}>
+                  {peers.data.gaps.map((g) => (
+                    <li key={g.vendor}>
+                      <strong>{g.peers.length} of {g.of}</strong> peers use <strong>{g.vendor}</strong> ({g.category}); {subject.split(" · ")[0]} doesn&apos;t show it:{" "}
+                      {g.peers.map((p, i) => (
+                        <span key={p.name}>{i > 0 && ", "}<a href={p.url} target="_blank" rel="noopener noreferrer" title={p.evidence} className={styles.source}>{p.name}</a></span>
+                      ))}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <p className={styles.note}>
+                Compared {peers.data.compared.map((c) => `${c.name} (${c.domain})`).join(", ") || "no peers"}.
+                {peers.data.skipped.length > 0 && ` Left out ${peers.data.skipped.join(", ")}: no website we could confirm was theirs.`}
+              </p>
+            </>
+          )}
+        </section>
+      )}
 
       {/* 2. Why now */}
       <section className={styles.section}>

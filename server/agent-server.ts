@@ -25,6 +25,7 @@ import { findEasterEgg } from "../src/easter-eggs/index.js";
 import { saveEntityExtraction, saveLittleSisRelationships } from "../src/database/knowledge-graph.js";
 import { recordsFromBundle } from "../src/lib/entities/records.js";
 import { notAvailable, registerExclusionRoutes, searchBlocked } from "./exclusion-routes.js";
+import { registerDisplacementRoutes } from "./displacement-routes.js";
 import { signUnsubscribeToken, unsubscribeHeaders, unsubscribePageUrl, verifyUnsubscribeToken } from "../src/lib/email/unsubscribe.js";
 import { upsertStatewideExecutives } from "../src/database/statewide-executives.js";
 import { DirectFetchProvider, SerperSearchProvider } from "../src/lib/providers.js";
@@ -1959,6 +1960,7 @@ app.post("/admin/statewide-executives/refresh", async (req, res) => {
 app.get("/health", (_, res) => res.json({ ok: true, build: BUILD_ID, timestamp: new Date().toISOString() }));
 
 registerExclusionRoutes(app, { supabase, authCheck, getUserTier, checkHourlyBucket, frontendUrl: ALLOWED_ORIGIN });
+registerDisplacementRoutes(app, { supabase, authCheck, checkHourlyBucket });
 
 // Email unsubscribe (CAN-SPAM). The token is signed (src/lib/email/unsubscribe.ts),
 // so no session is needed; the web app's /unsubscribe page and one-click
