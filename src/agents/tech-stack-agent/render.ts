@@ -16,10 +16,12 @@ const linkUrl = (s: string) => s.replace(/\(/g, "%28").replace(/\)/g, "%29").rep
 
 export function techSummary(t: TechStack): string {
   const n = t.items.length;
-  const found = n === 0 ? "no tools visible in public records" : `${n} tool${n === 1 ? "" : "s"} found`;
-  const scope = t.websiteUnavailable
-    ? `Public DNS only; the homepage couldn't be read (${t.websiteUnavailable}).`
-    : "From public DNS and the homepage.";
+  const likely = t.items.filter((i) => i.confidence === "likely").length;
+  const found = n === 0 ? "no tools visible in public records"
+    : `${n} tool${n === 1 ? "" : "s"} found${likely ? ` (${likely} likely, from subdomain names only)` : ""}`;
+  const sources = ["public DNS", t.websiteUnavailable ? "" : "the homepage", t.subdomainsChecked ? "certificate logs" : ""].filter(Boolean);
+  const list = sources.length > 1 ? `${sources.slice(0, -1).join(", ")} and ${sources[sources.length - 1]}` : sources[0];
+  const scope = `From ${list}.${t.websiteUnavailable ? ` The homepage couldn't be read (${t.websiteUnavailable}).` : ""}`;
   return `${t.domain}: ${found}. ${scope} Internal tools often leave no public trace, so a missing category means not visible, not not used.`;
 }
 

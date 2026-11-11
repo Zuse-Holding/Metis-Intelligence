@@ -22,15 +22,16 @@ export type TechCategory =
   | "Customer support" | "Live chat" | "Collaboration" | "E-signature" | "Accounting and ERP" | "Payments"
   | "Identity and security" | "IT service management" | "Hosting" | "CDN and security" | "DNS" | "CMS"
   | "E-commerce" | "Analytics" | "Tag management" | "Advertising" | "Consent management" | "Scheduling"
-  | "Forms" | "Monitoring" | "Recruiting" | "Reviews and messaging" | "Video" | "Business identity";
+  | "Forms" | "Monitoring" | "Recruiting" | "Reviews and messaging" | "Video" | "Business identity"
+  | "Business intelligence" | "Developer tools";
 
 /** Display order for the report section. */
 export const CATEGORY_ORDER: TechCategory[] = [
   "CRM", "Marketing automation", "Sales intelligence", "Email", "Email delivery", "Email security",
   "Customer support", "Live chat", "Reviews and messaging", "Collaboration", "E-signature", "Accounting and ERP",
-  "Payments", "E-commerce", "Identity and security", "IT service management", "Recruiting", "Scheduling", "Forms",
-  "CMS", "Hosting", "CDN and security", "DNS", "Analytics", "Tag management", "Advertising", "Consent management",
-  "Monitoring", "Video", "Business identity",
+  "Payments", "E-commerce", "Identity and security", "IT service management", "Business intelligence", "Recruiting",
+  "Scheduling", "Forms", "CMS", "Hosting", "CDN and security", "DNS", "Developer tools", "Analytics", "Tag management",
+  "Advertising", "Consent management", "Monitoring", "Video", "Business identity",
 ];
 
 export type IpProvider = "aws" | "cloudfront" | "gcp" | "cloudflare";
@@ -41,7 +42,11 @@ export type Signal =
   | { kind: "cname"; re: RegExp }
   | { kind: "ip"; provider: IpProvider }
   | { kind: "header"; name: string; re?: RegExp }
-  | { kind: "html"; re: RegExp };
+  | { kind: "html"; re: RegExp }
+  /** A word in one of the company's own subdomain names from certificate
+   *  logs ("jira" in jira.corp.acme.com). The name alone is suggestive,
+   *  not proof, so these items are "likely". */
+  | { kind: "subdomain"; re: RegExp };
 
 export interface VendorDef {
   vendor: string;
@@ -54,6 +59,11 @@ const ns = (re: RegExp): Signal => ({ kind: "ns", re });
 const cname = (re: RegExp): Signal => ({ kind: "cname", re });
 const header = (name: string, re?: RegExp): Signal => ({ kind: "header", name: name.toLowerCase(), re });
 const html = (re: RegExp): Signal => ({ kind: "html", re });
+/** Subdomain words, allowing an environment suffix: "fiori", "fioridev", "jira2". */
+const sub = (...words: string[]): Signal => ({
+  kind: "subdomain",
+  re: new RegExp(`^(${words.join("|")})(dev|qa|test|stg|stage|staging|prod|prd|uat|\\d+)?$`, "i"),
+});
 
 export const VENDORS: VendorDef[] = [
   // ── Mail-record vendors. Kept first and in this order: domain posture's
@@ -68,17 +78,22 @@ export const VENDORS: VendorDef[] = [
     mail(/hubspotemail|hubspot/i),
     html(/js\.hs-scripts\.com|js\.hsforms\.net|js\.hs-analytics\.net|js\.hs-banner\.com|js\.hubspot\.com|js\.usemessages\.com|hsappstatic\.net/i),
     html(/^generator:\s*HubSpot/i),
+    cname(/hubspot\.net$|hs-sites\.com$|hubspotpagebuilder\.com$|hscoretech\.net$/i),
+    sub("hubspot"),
   ] },
-  { vendor: "Salesforce", category: "CRM", signals: [mail(/_spf\.salesforce\.com|salesforce/i), html(/webto\.salesforce\.com|\.my\.salesforce\.com|force\.com\/servlet/i)] },
+  { vendor: "Salesforce", category: "CRM", signals: [
+    mail(/_spf\.salesforce\.com|salesforce/i), html(/webto\.salesforce\.com|\.my\.salesforce\.com|force\.com\/servlet/i),
+    cname(/\.force\.com$|salesforce-sites\.com$|siteforce\.com$|\.my\.salesforce\.com$/i), sub("salesforce", "sfdc"),
+  ] },
   { vendor: "Paubox (HIPAA email)", category: "Email security", signals: [mail(/paubox/i)] },
-  { vendor: "SendGrid", category: "Email delivery", signals: [mail(/sendgrid/i)] },
-  { vendor: "Mailgun", category: "Email delivery", signals: [mail(/mailgun/i)] },
+  { vendor: "SendGrid", category: "Email delivery", signals: [mail(/sendgrid/i), cname(/sendgrid\.net$/i)] },
+  { vendor: "Mailgun", category: "Email delivery", signals: [mail(/mailgun/i), cname(/mailgun\.org$/i)] },
   { vendor: "Amazon SES", category: "Email delivery", signals: [mail(/amazonses/i)] },
-  { vendor: "Mailchimp", category: "Marketing automation", signals: [mail(/mcsv\.net|mailchimp|mandrillapp|mandrill_verify/i), html(/chimpstatic\.com|list-manage\.com/i)] },
-  { vendor: "Zendesk", category: "Customer support", signals: [mail(/zendesk/i), html(/static\.zdassets\.com|\.zendesk\.com\/embeddable|zopim/i)] },
-  { vendor: "Freshworks", category: "Customer support", signals: [mail(/freshdesk|freshworks/i), html(/wchat\.freshchat\.com|widget\.freshworks\.com/i)] },
+  { vendor: "Mailchimp", category: "Marketing automation", signals: [mail(/mcsv\.net|mailchimp|mandrillapp|mandrill_verify/i), html(/chimpstatic\.com|list-manage\.com/i), cname(/mandrillapp\.com$|list-manage\.com$/i)] },
+  { vendor: "Zendesk", category: "Customer support", signals: [mail(/zendesk/i), html(/static\.zdassets\.com|\.zendesk\.com\/embeddable|zopim/i), cname(/\.zendesk\.com$/i), sub("zendesk")] },
+  { vendor: "Freshworks", category: "Customer support", signals: [mail(/freshdesk|freshworks/i), html(/wchat\.freshchat\.com|widget\.freshworks\.com/i), cname(/freshdesk\.com$|freshservice\.com$/i), sub("freshdesk", "freshservice")] },
   { vendor: "Zoho", category: "CRM", signals: [mail(/zoho/i), html(/salesiq\.zoho|zohopublic|zohocdn/i)] },
-  { vendor: "Atlassian", category: "Collaboration", signals: [mail(/atlassian/i)] },
+  { vendor: "Atlassian", category: "Collaboration", signals: [mail(/atlassian/i), cname(/atlassian\.net$/i), sub("jira", "confluence", "bitbucket", "atlassian")] },
   { vendor: "DocuSign", category: "E-signature", signals: [mail(/docusign/i)] },
   { vendor: "BidTracer", category: "Collaboration", signals: [mail(/bidtracer/i)] },
   { vendor: "QuickBooks", category: "Accounting and ERP", signals: [mail(/intuit|quickbooks/i)] },
@@ -94,15 +109,16 @@ export const VENDORS: VendorDef[] = [
   { vendor: "Sophos Email", category: "Email security", signals: [mail(/sophos/i)] },
   { vendor: "Rackspace Email", category: "Email", signals: [mail(/emailsrvr\.com/i)] },
   { vendor: "GoDaddy email servers", category: "Email delivery", signals: [mail(/secureserver\.net/i)] },
-  { vendor: "Marketo", category: "Marketing automation", signals: [mail(/mktomail\.com/i), html(/munchkin\.marketo\.net|marketo\.com\/js\/forms2|mktoweb\.com/i)] },
-  { vendor: "Salesforce Marketing Cloud (Pardot)", category: "Marketing automation", signals: [html(/pi\.pardot\.com|go\.pardot\.com|cdn\.pardot\.com/i)] },
+  { vendor: "Marketo", category: "Marketing automation", signals: [mail(/mktomail\.com/i), html(/munchkin\.marketo\.net|marketo\.com\/js\/forms2|mktoweb\.com/i), cname(/mktoweb\.com$|mktossl\.com$|mktoedge\.com$/i), sub("marketo", "mkto")] },
+  { vendor: "Salesforce Marketing Cloud (Pardot)", category: "Marketing automation", signals: [html(/pi\.pardot\.com|go\.pardot\.com|cdn\.pardot\.com/i), cname(/pardot\.com$/i), sub("pardot")] },
+  { vendor: "Salesforce Marketing Cloud Engagement", category: "Marketing automation", signals: [cname(/exacttarget\.com$|marketingcloudapps\.com$|sfmc-content\.com$/i)] },
   { vendor: "Mailjet", category: "Email delivery", signals: [mail(/mailjet/i)] },
   { vendor: "Brevo", category: "Marketing automation", signals: [mail(/sendinblue|brevo/i), html(/sibautomation\.com|brevo\.com\/js/i)] },
   { vendor: "Constant Contact", category: "Marketing automation", signals: [mail(/constantcontact/i), html(/ctctcdn\.com/i)] },
   { vendor: "SparkPost", category: "Email delivery", signals: [mail(/sparkpostmail/i)] },
-  { vendor: "NetSuite", category: "Accounting and ERP", signals: [mail(/netsuite/i)] },
-  { vendor: "ServiceNow", category: "IT service management", signals: [mail(/service-now\.com/i)] },
-  { vendor: "Atlassian Statuspage", category: "IT service management", signals: [mail(/status-page-domain-verification/i)] },
+  { vendor: "NetSuite", category: "Accounting and ERP", signals: [mail(/netsuite/i), sub("netsuite")] },
+  { vendor: "ServiceNow", category: "IT service management", signals: [mail(/service-now\.com/i), cname(/service-now\.com$/i), sub("servicenow")] },
+  { vendor: "Atlassian Statuspage", category: "IT service management", signals: [mail(/status-page-domain-verification/i), cname(/stspg-customer\.com$|statuspage\.io$/i)] },
   { vendor: "Slack", category: "Collaboration", signals: [mail(/slack-domain-verification/i)] },
   { vendor: "Zoom", category: "Collaboration", signals: [mail(/zoom_verify|zoom-domain-verification/i)] },
   { vendor: "Webex", category: "Collaboration", signals: [mail(/webexdomainverification|cisco-ci-domain-verification/i)] },
@@ -111,10 +127,10 @@ export const VENDORS: VendorDef[] = [
   { vendor: "Smartsheet", category: "Collaboration", signals: [mail(/smartsheet/i)] },
   { vendor: "Miro", category: "Collaboration", signals: [mail(/miro-verification/i)] },
   { vendor: "Adobe", category: "E-signature", signals: [mail(/adobe-idp-site-verification|adobe-sign-verification/i)] },
-  { vendor: "Citrix", category: "Identity and security", signals: [mail(/citrix-verification-code/i)] },
+  { vendor: "Citrix", category: "Identity and security", signals: [mail(/citrix-verification-code/i), cname(/(^|\.)sharefile\.com$|\.cloud\.com$/i), sub("citrix", "ctx", "storefront", "netscaler")] },
   { vendor: "GoTo (LogMeIn)", category: "IT service management", signals: [mail(/logmein-verification-code/i)] },
   { vendor: "TeamViewer", category: "IT service management", signals: [mail(/teamviewer-sso-verification/i)] },
-  { vendor: "Duo Security", category: "Identity and security", signals: [mail(/duo_sso_verification/i)] },
+  { vendor: "Duo Security", category: "Identity and security", signals: [mail(/duo_sso_verification/i), sub("duo")] },
   { vendor: "LastPass", category: "Identity and security", signals: [mail(/lastpass-verification-code/i)] },
   { vendor: "KnowBe4", category: "Identity and security", signals: [mail(/knowbe4/i)] },
   { vendor: "Jamf", category: "IT service management", signals: [mail(/jamf-site-verification/i)] },
@@ -166,7 +182,7 @@ export const VENDORS: VendorDef[] = [
   { vendor: "Wix", category: "CMS", signals: [cname(/wixdns\.net$/i), ns(/wixdns\.net$/i), header("x-wix-request-id"), html(/^generator:\s*Wix/i), html(/static\.wixstatic\.com|static\.parastorage\.com/i)] },
   { vendor: "GoDaddy Website Builder", category: "CMS", signals: [cname(/godaddysites\.com$/i), html(/img1\.wsimg\.com\/(blobby|isteam)/i)] },
   { vendor: "Duda", category: "CMS", signals: [html(/dd-cdn\.multiscreensite\.com|irp\.cdn-website\.com/i)] },
-  { vendor: "Shopify", category: "E-commerce", signals: [cname(/myshopify\.com$/i), header("x-shopify-stage"), header("x-shopid"), html(/cdn\.shopify\.com/i)] },
+  { vendor: "Shopify", category: "E-commerce", signals: [cname(/myshopify\.com$/i), header("x-shopify-stage"), header("x-shopid"), html(/cdn\.shopify\.com/i), sub("shopify")] },
   { vendor: "BigCommerce", category: "E-commerce", signals: [html(/cdn\d*\.bigcommerce\.com/i)] },
   { vendor: "WooCommerce", category: "E-commerce", signals: [html(/\/plugins\/woocommerce\//i)] },
 
@@ -199,7 +215,7 @@ export const VENDORS: VendorDef[] = [
   { vendor: "Qualified", category: "Live chat", signals: [html(/js\.qualified\.com/i)] },
 
   // ── Chat, support and customer messaging.
-  { vendor: "Intercom", category: "Live chat", signals: [html(/widget\.intercom\.io|js\.intercomcdn\.com/i)] },
+  { vendor: "Intercom", category: "Live chat", signals: [html(/widget\.intercom\.io|js\.intercomcdn\.com/i), cname(/custom\.intercom\.help$|intercom\.help$/i)] },
   { vendor: "Drift", category: "Live chat", signals: [html(/js\.driftt\.com/i)] },
   { vendor: "LiveChat", category: "Live chat", signals: [html(/cdn\.livechatinc\.com/i)] },
   { vendor: "Tawk.to", category: "Live chat", signals: [html(/embed\.tawk\.to/i)] },
@@ -207,7 +223,7 @@ export const VENDORS: VendorDef[] = [
   { vendor: "Olark", category: "Live chat", signals: [html(/static\.olark\.com/i)] },
   { vendor: "Podium", category: "Reviews and messaging", signals: [html(/connect\.podium\.com/i)] },
   { vendor: "Birdeye", category: "Reviews and messaging", signals: [html(/birdeye\.com\/embed|birdeye\.com\/widget/i)] },
-  { vendor: "Klaviyo", category: "Marketing automation", signals: [html(/static\.klaviyo\.com/i)] },
+  { vendor: "Klaviyo", category: "Marketing automation", signals: [html(/static\.klaviyo\.com/i), cname(/klaviyomail\.com$|klclick\d*\.com$/i)] },
   { vendor: "ActiveCampaign", category: "Marketing automation", signals: [html(/trackcmp\.net|\.activehosted\.com/i)] },
 
   // ── Payments, scheduling, forms.
@@ -231,11 +247,46 @@ export const VENDORS: VendorDef[] = [
   // ── Recruiting (careers pages embedded or linked from the homepage).
   { vendor: "Greenhouse", category: "Recruiting", signals: [html(/boards\.greenhouse\.io|job-boards\.greenhouse\.io/i)] },
   { vendor: "Lever", category: "Recruiting", signals: [html(/jobs\.lever\.co/i)] },
-  { vendor: "Workday", category: "Recruiting", signals: [html(/myworkdayjobs\.com/i)] },
+  { vendor: "Workday", category: "Recruiting", signals: [html(/myworkdayjobs\.com/i), cname(/myworkdayjobs\.com$|workday\.com$/i), sub("workday")] },
   { vendor: "iCIMS", category: "Recruiting", signals: [html(/\.icims\.com/i)] },
   { vendor: "BambooHR", category: "Recruiting", signals: [html(/\.bamboohr\.com\/(careers|jobs)/i)] },
   { vendor: "ADP", category: "Recruiting", signals: [html(/workforcenow\.adp\.com/i)] },
   { vendor: "Paylocity", category: "Recruiting", signals: [html(/recruiting\.paylocity\.com/i)] },
+
+  // ── Mostly seen through the company's own subdomains (tech stack phase 2):
+  // a CNAME to the vendor is confirmed; a subdomain name alone is likely.
+  { vendor: "Okta", category: "Identity and security", signals: [cname(/okta(preview|-emea)?\.com$|oktacdn\.com$/i), sub("okta")] },
+  { vendor: "Auth0", category: "Identity and security", signals: [cname(/auth0\.com$/i), sub("auth0")] },
+  { vendor: "Ping Identity", category: "Identity and security", signals: [cname(/pingone\.com$|pingidentity\.com$/i), sub("pingfed", "pingfederate", "pingone")] },
+  { vendor: "Microsoft AD FS", category: "Identity and security", signals: [sub("adfs")] },
+  { vendor: "Zscaler", category: "Identity and security", signals: [cname(/zscaler(two|three|beta)?\.net$/i), sub("zscaler")] },
+  { vendor: "Palo Alto Networks GlobalProtect", category: "Identity and security", signals: [sub("globalprotect")] },
+  { vendor: "Cisco AnyConnect", category: "Identity and security", signals: [sub("anyconnect")] },
+  { vendor: "Fortinet", category: "Identity and security", signals: [sub("fortigate", "fortinet", "fortivpn", "forticlient")] },
+  { vendor: "Ivanti Pulse Secure", category: "Identity and security", signals: [sub("pulsesecure")] },
+  { vendor: "Microsoft Exchange (on-premises)", category: "Email", signals: [sub("owa", "exchange", "exchmail")] },
+  { vendor: "Microsoft SharePoint", category: "Collaboration", signals: [sub("sharepoint")] },
+  { vendor: "Microsoft Dynamics 365", category: "CRM", signals: [cname(/\.dynamics\.com$/i), sub("d365", "dynamics", "dynamics365")] },
+  { vendor: "SAP", category: "Accounting and ERP", signals: [cname(/\.ondemand\.com$|sapbydesign\.com$|s4hana\.cloud\.sap$/i), sub("sap", "fiori", "s4hana", "hana", "saprouter", "sapgw")] },
+  { vendor: "Oracle Applications", category: "Accounting and ERP", signals: [cname(/oraclecloud\.com$/i), sub("peoplesoft", "jde", "jdedwards", "oracleebs")] },
+  { vendor: "Tableau", category: "Business intelligence", signals: [cname(/tableau\.com$/i), sub("tableau")] },
+  { vendor: "Microsoft Power BI", category: "Business intelligence", signals: [sub("powerbi")] },
+  { vendor: "Looker", category: "Business intelligence", signals: [cname(/looker\.com$/i), sub("looker")] },
+  { vendor: "Grafana", category: "Monitoring", signals: [cname(/grafana\.net$/i), sub("grafana")] },
+  { vendor: "Elastic", category: "Monitoring", signals: [cname(/elastic-cloud\.com$|found\.io$/i), sub("kibana", "elastic", "elasticsearch")] },
+  { vendor: "GitLab", category: "Developer tools", signals: [cname(/gitlab\.io$/i), sub("gitlab")] },
+  { vendor: "GitHub Enterprise", category: "Developer tools", signals: [sub("github", "ghe")] },
+  { vendor: "Jenkins", category: "Developer tools", signals: [sub("jenkins")] },
+  { vendor: "GitBook", category: "Developer tools", signals: [cname(/gitbook\.io$/i)] },
+  { vendor: "ReadMe", category: "Developer tools", signals: [cname(/readme\.io$|readmessl\.com$/i)] },
+  { vendor: "VMware", category: "Hosting", signals: [sub("vcenter", "vsphere", "vmware")] },
+  { vendor: "Help Scout", category: "Customer support", signals: [cname(/helpscoutdocs\.com$/i)] },
+  { vendor: "Unbounce", category: "Marketing automation", signals: [cname(/unbouncepages\.com$/i)] },
+  { vendor: "Instapage", category: "Marketing automation", signals: [cname(/pageserve\.co$/i)] },
+  { vendor: "Braze", category: "Marketing automation", signals: [cname(/braze\.com$|appboy\.com$/i)] },
+  { vendor: "Iterable", category: "Marketing automation", signals: [cname(/iterable\.com$/i)] },
+  { vendor: "Cvent", category: "Marketing automation", signals: [cname(/cvent\.com$/i), sub("cvent")] },
+  { vendor: "Qualtrics", category: "Analytics", signals: [cname(/qualtrics\.com$/i), sub("qualtrics")] },
 ];
 
 // ── Mail-record matching (shared with domain posture's "Systems in use") ─────

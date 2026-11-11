@@ -179,10 +179,10 @@ export default function SalesTab({ subject, bundle, runId }: Props) {
                           href={i.sourceUrl}
                           target="_blank"
                           rel="noopener noreferrer"
-                          title={`${i.evidence} (${i.sourceName})`}
-                          className={`${styles.vendor} ${offer && isCompetitor(i.vendor, offer.competitors) ? styles.vendorCompetitor : ""}`}
+                          title={`${i.confidence === "likely" ? "Likely, from a subdomain name only. " : ""}${i.evidence} (${i.sourceName})`}
+                          className={`${styles.vendor} ${i.confidence === "likely" ? styles.vendorLikely : ""} ${offer && isCompetitor(i.vendor, offer.competitors) ? styles.vendorCompetitor : ""}`}
                         >
-                          {i.vendor}
+                          {i.vendor}{i.confidence === "likely" && <span className={styles.likelyMark}> · likely</span>}
                         </a>
                       ))}
                     </span>

@@ -152,7 +152,8 @@ describe("Tech Stack report section", () => {
   });
 
   it("says when only DNS could be read, and that missing means not visible", () => {
-    assert.match(techSummary({ ...stack, websiteUnavailable: "the site returned HTTP 403" }), /Public DNS only; the homepage couldn't be read \(the site returned HTTP 403\)/);
+    assert.match(techSummary({ ...stack, websiteUnavailable: "the site returned HTTP 403" }), /From public DNS\. The homepage couldn't be read \(the site returned HTTP 403\)/);
+    assert.match(techSummary({ ...stack, subdomainsChecked: true }), /From public DNS, the homepage and certificate logs\./);
     assert.match(techSummary({ ...stack, items: [] }), /no tools visible in public records/);
     assert.match(techSummary(stack), /not visible, not not used/);
   });

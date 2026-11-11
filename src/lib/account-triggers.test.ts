@@ -92,6 +92,13 @@ describe("account triggers", () => {
     assert.deepEqual(detectTriggers(prev, next), []);
   });
 
+  it("subdomain finds and likely items never trigger (they vary run to run)", () => {
+    const sub = (vendor: string, confidence: "confirmed" | "likely") => ({ ...item(vendor, "Collaboration"), layer: "subdomain" as const, confidence });
+    const prev = base({ techStack: { domain: "a.com", checkedAt: "", subdomainsChecked: true, items: [sub("Pantheon", "confirmed")] } });
+    const next = base({ techStack: { domain: "a.com", checkedAt: "", subdomainsChecked: true, items: [sub("Zendesk", "confirmed"), sub("Atlassian", "likely")] } });
+    assert.deepEqual(detectTriggers(prev, next), []);
+  });
+
   it("every trigger has a source and a bounded title", () => {
     const next = base({ news: [{ headline: "Acme lays off " + "x".repeat(400), url: "https://n/1" }, { headline: "Acme lays off staff" }] });
     const got = detectTriggers(base(), next);
