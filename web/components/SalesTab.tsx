@@ -4,6 +4,8 @@ import EmptyState from "./EmptyState";
 import SellerOfferForm from "./SellerOfferForm";
 import { Spinner } from "./Skeleton";
 import { contacts, isCompetitor, outreachBrief, snapshot, whyNow, type SalesBundle, type SellerOffer } from "../lib/sales";
+import { outreach, outreachLines, type Evidence, type WeakSpot } from "../lib/outreach";
+import { isEnabled } from "../lib/flags";
 import styles from "./SalesTab.module.css";
 
 interface Props {
@@ -13,7 +15,6 @@ interface Props {
   runId?: string;
 }
 
-interface WeakSpot { kind: string; title: string; url: string; date: string; outlet?: string }
 interface PeerGap { vendor: string; category: string; of: number; peers: { name: string; evidence: string; url: string }[] }
 interface PeerResult { gaps: PeerGap[]; compared: { name: string; domain: string; tools: number }[]; skipped: string[]; reason?: string }
 
@@ -78,6 +79,13 @@ export default function SalesTab({ subject, bundle, runId }: Props) {
   const snap = useMemo(() => snapshot(b), [b]);
   const stack = b.techStack;
   const competitorsUsed = stack && offer ? stack.items.filter((i) => isCompetitor(i.vendor, offer.competitors)) : [];
+  const sayOn = isEnabled("outreach");
+  const loadedSpots = useMemo(() => {
+    const m: Record<string, WeakSpot[]> = {};
+    for (const [vendor, s] of Object.entries(spots)) if (s.state === "done") m[vendor] = s.data;
+    return m;
+  }, [spots]);
+  const say = useMemo(() => (sayOn ? outreach(b, offer, loadedSpots) : ({} as ReturnType<typeof outreach>)), [sayOn, b, offer, loadedSpots]);
 
   const byCategory = useMemo(() => {
     const m = new Map<string, NonNullable<SalesBundle["techStack"]>["items"]>();
@@ -86,7 +94,7 @@ export default function SalesTab({ subject, bundle, runId }: Props) {
   }, [stack]);
 
   async function copyBrief() {
-    const text = outreachBrief(subject, b, offer);
+    const text = [outreachBrief(subject, b, offer), ...(sayOn ? outreachLines(say) : [])].join("\n");
     try {
       await navigator.clipboard.writeText(text);
       setCopied("done");
@@ -269,6 +277,36 @@ export default function SalesTab({ subject, bundle, runId }: Props) {
         )}
       </section>
 
+      {/* What to say (ABM brief §1) */}
+      {sayOn && (
+        <section className={styles.section}>
+          <h3 className={styles.sectionTitle}>What to say</h3>
+          {!say.opener && !say.objection ? (
+            <EmptyState size="compact" title="Nothing in this report to build an opening line on" when="Lines appear only when a dated, sourced finding backs them" />
+          ) : (
+            <div className={styles.say}>
+              {say.opener && (
+                <div className={styles.sayItem}>
+                  <span className={styles.sayLabel}>Opening line</span>
+                  <p className={styles.sayText}>{say.opener.text} <Sources items={say.opener.evidence} /></p>
+                </div>
+              )}
+              {say.objection && (
+                <div className={styles.sayItem}>
+                  <span className={styles.sayLabel}>Likely objection</span>
+                  <p className={styles.sayText}>&ldquo;{say.objection.objection}&rdquo; <Sources items={say.objection.evidence} /></p>
+                  <span className={styles.sayLabel}>Suggested response</span>
+                  <p className={styles.sayText}>{say.objection.response} {say.objection.responseEvidence.length > 0 && <Sources items={say.objection.responseEvidence} />}</p>
+                </div>
+              )}
+              {competitorsUsed.some((c) => !spots[c.vendor]) && (
+                <span className={styles.note}>Check the news on {competitorsUsed.filter((c) => !spots[c.vendor]).map((c) => c.vendor).join(", ")} above to use it here.</span>
+              )}
+            </div>
+          )}
+        </section>
+      )}
+
       {/* 4. Account snapshot */}
       <section className={styles.section}>
         <h3 className={styles.sectionTitle}>Account snapshot</h3>
@@ -288,5 +326,16 @@ export default function SalesTab({ subject, bundle, runId }: Props) {
         )}
       </section>
     </div>
+  );
+}
+
+/** The findings a line rests on, as source links. */
+function Sources({ items }: { items: Evidence[] }) {
+  return (
+    <span className={styles.sayEvidence}>
+      {items.map((e, i) => (
+        <span key={e.url}>{i > 0 && " · "}<a href={e.url} target="_blank" rel="noopener noreferrer" className={styles.source}>{e.label} ↗</a></span>
+      ))}
+    </span>
   );
 }
