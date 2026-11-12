@@ -82,6 +82,12 @@
 .snapshotRow dt { color: var(--muted); }
 .snapshotRow dd { margin: 0; color: var(--text); overflow-wrap: anywhere; }
 
+.say { display: flex; flex-direction: column; gap: 14px; }
+.sayItem { display: flex; flex-direction: column; gap: 4px; }
+.sayLabel { font-size: 11px; font-weight: 600; color: var(--muted); }
+.sayText { font-size: 13px; line-height: 1.6; color: var(--text); margin: 0 0 6px; }
+.sayEvidence { white-space: normal; }
+
 @media (max-width: 700px) {
   .stackRow, .event, .person, .snapshotRow { grid-template-columns: 1fr; gap: 2px; }
 }
