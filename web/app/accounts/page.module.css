@@ -91,8 +91,10 @@
   padding-bottom: 2px;
 }
 
-.company { font-family: var(--font-display); font-weight: 600; display: flex; align-items: center; gap: 6px; min-width: 0; }
-.company a { color: var(--text); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Badges wrap under a long name instead of squeezing it to one word a line. */
+.company { font-family: var(--font-display); font-weight: 600; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-width: 0; }
+.company a,
+.companyName { color: var(--text); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
 .company a:hover { color: var(--orange); text-decoration: underline; }
 .hasNotes { color: var(--muted); font-size: 11px; }
 
@@ -127,6 +129,15 @@
 }
 .changeList { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.6; }
 .source { color: var(--cyan); font-size: 11px; }
+
+/* Laptop widths: the six columns (with four action buttons) need about
+   1100px of content, wider than the space beside the sidebar, so the
+   buttons ran off the right edge. Move them to their own line instead. */
+@media (min-width: 901px) and (max-width: 1440px) {
+  .row { grid-template-columns: minmax(160px, 2fr) 130px 100px minmax(110px, 1fr) 110px; }
+  .actions { grid-column: 1 / -1; }
+  .headRow > span:last-child { display: none; }
+}
 
 @media (max-width: 900px) {
   .content { padding: 16px; }
