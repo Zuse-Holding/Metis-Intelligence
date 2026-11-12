@@ -409,7 +409,7 @@ export default function AccountsPage() {
     );
   }
 
-  const companyLink = (a: Account) => a.latestRun ? <a href={`/app?run=${a.latestRun.id}`}>{a.company}</a> : <>{a.company}</>;
+  const companyLink = (a: Account) => a.latestRun ? <a href={`/app?run=${a.latestRun.id}`} title={a.company}>{a.company}</a> : <span className={styles.companyName} title={a.company}>{a.company}</span>;
 
   return (
     <div className={styles.shell}>
