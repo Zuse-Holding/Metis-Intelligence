@@ -2,6 +2,7 @@ import type { Source } from "../../types/research.js";
 import { dohUrl } from "../domain-posture-agent/index.js";
 import { unsafeUrlReason } from "../../lib/public-url.js";
 import { CATEGORY_ORDER, VENDORS, mailMatches, mailRecords, type IpProvider, type Signal, type TechCategory } from "./vendors.js";
+import { boardsFromHtml, careersUrls, readBoard, toolsFromPostings, type Ats, type JobBoard, type JobPosting } from "./job-boards.js";
 
 /**
  * Tech stack detection, phase 1 (ABM brief §2): which vendors a company
@@ -21,7 +22,7 @@ import { CATEGORY_ORDER, VENDORS, mailMatches, mailRecords, type IpProvider, typ
 export type Confidence = "confirmed" | "likely";
 /** "subdomain": found through the company's subdomains in certificate logs,
  *  which depend on a log service answering (so triggers skip them when it didn't). */
-export type Layer = "dns" | "website" | "subdomain";
+export type Layer = "dns" | "website" | "subdomain" | "jobs";
 
 export interface TechItem {
   vendor: string;
@@ -44,6 +45,9 @@ export interface TechStack {
   websiteUnavailable?: string;
   /** True when certificate logs answered, so subdomain items are complete. */
   subdomainsChecked?: boolean;
+  /** Job boards read for postings (FEATURE_JOB_POSTINGS), with their open
+   *  roles' titles. Absent when postings weren't checked. */
+  jobBoards?: { ats: Ats; url: string; postings: { title: string; url: string; postedAt?: string }[] }[];
 }
 
 /** Everything the detector reads. Each field undefined = not gathered. */
@@ -472,13 +476,49 @@ export class TechStackAgent {
     return signals;
   }
 
-  async run(domain: string, website?: string): Promise<{ stack?: TechStack; sources: Source[] }> {
+  /**
+   * Job boards linked from the homepage or, failing that, a careers page,
+   * and their postings. Only the company's own pages are read for the
+   * link, so a namesake's board is never used.
+   */
+  async jobPostings(homepageUrl: string | undefined, html: string | undefined): Promise<{ board: JobBoard; postings: JobPosting[] }[]> {
+    let boards = boardsFromHtml(html ?? "");
+    if (!boards.length && homepageUrl) {
+      for (const url of careersUrls(homepageUrl, html)) {
+        const page = await fetchHomepage(url);
+        if ("error" in page || !page.html) continue;
+        boards = boardsFromHtml(page.html);
+        if (boards.length) break;
+      }
+    }
+    const read = await Promise.all(boards.map(async (board) => ({ board, postings: await readBoard(board) })));
+    return read.filter((r): r is { board: JobBoard; postings: JobPosting[] } => r.postings !== null);
+  }
+
+  async run(domain: string, website?: string, opts: { jobs?: boolean } = {}): Promise<{ stack?: TechStack; sources: Source[] }> {
     const signals = await this.gather(domain, website);
     const nothingGathered = signals.mx === undefined && signals.txt === undefined && signals.ns === undefined && !signals.headers;
     if (nothingGathered) return { sources: [] };
     const checkedAt = new Date().toISOString();
     const items = detectTechStack(signals);
     const stack: TechStack = { domain, checkedAt, items, websiteUnavailable: signals.websiteUnavailable, subdomainsChecked: signals.subdomains !== undefined };
+    if (opts.jobs) {
+      const boards = await this.jobPostings(signals.pageUrl ?? website ?? `https://${domain}/`, signals.html);
+      stack.jobBoards = boards.map(({ board, postings }) => ({
+        ats: board.ats, url: board.url,
+        postings: postings.slice(0, 50).map((p) => ({ title: p.title, url: p.url, postedAt: p.postedAt })),
+      }));
+      const seen = new Set(items.map((i) => i.vendor.toLowerCase()));
+      for (const t of toolsFromPostings(boards.flatMap((b) => b.postings))) {
+        if (seen.has(t.vendor.toLowerCase())) continue;
+        items.push({
+          vendor: t.vendor, category: t.category, confidence: "likely", layer: "jobs",
+          evidence: `Job posting "${t.posting.title}": "${t.quote}"`,
+          sourceName: `Job posting (${t.posting.board})`, sourceUrl: t.posting.url,
+        });
+      }
+      items.sort((a, b) => CATEGORY_ORDER.indexOf(a.category) - CATEGORY_ORDER.indexOf(b.category));
+    }
     const sources: Source[] = [...new Map(items.map((i) => [i.sourceUrl, i])).values()]
       .map((i) => ({ url: i.sourceUrl, title: i.sourceName, retrievedAt: checkedAt, usedFor: ["techstack"] }));
     return { stack, sources };
