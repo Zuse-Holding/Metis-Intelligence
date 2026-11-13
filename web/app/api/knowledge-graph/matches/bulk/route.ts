@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabaseClient } from "../../../../../lib/supabase/server";
 import { loadPendingMatches } from "../../../../../lib/kg-matches";
+import { checkRateLimit } from "../../../../../lib/rate-limit";
+import { BULK_MERGES_PER_HOUR, decideMatch, sessionUserId } from "../../../../../lib/supabase/kg-decide";
 
 /**
  * "Merge all from this report": confirms every pending match that a
@@ -15,6 +17,12 @@ export async function POST(req: NextRequest) {
   if (typeof runId !== "string" || !runId) {
     return NextResponse.json({ error: "runId required" }, { status: 400 });
   }
+  const userId = await sessionUserId();
+  if (!userId) return NextResponse.json({ error: "Sign in to review matches." }, { status: 401 });
+  const limit = checkRateLimit(`kg-bulk:${userId}`, BULK_MERGES_PER_HOUR, 60 * 60_000);
+  if (!limit.allowed) {
+    return NextResponse.json({ error: "Too many merges this hour. Try again later." }, { status: 429, headers: { "Retry-After": String(Math.ceil(limit.resetInMs / 1000)) } });
+  }
   const supabase = await createServerSupabaseClient();
   let pending;
   try {
@@ -28,11 +36,11 @@ export async function POST(req: NextRequest) {
   let merged = 0, skipped = 0;
   const failed: { name: string; error: string }[] = [];
   for (const m of targets) {
-    const { error } = await supabase.rpc("kg_decide_match", { p_review_id: m.id, p_decision: "confirmed" });
+    const error = await decideMatch(userId, m.id, "confirmed");
     if (!error) merged++;
     // An earlier merge in this batch already folded or removed this one.
-    else if (/already decided|not found|no longer exists/i.test(error.message)) skipped++;
-    else failed.push({ name: m.entity_name, error: error.message });
+    else if (/already decided|not found|no longer exists/i.test(error)) skipped++;
+    else failed.push({ name: m.entity_name, error });
   }
   return NextResponse.json({ merged, skipped, failed });
 }
