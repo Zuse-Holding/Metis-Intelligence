@@ -153,7 +153,7 @@ function storedSignals(value: unknown): IntentSignal[] {
   if (!Array.isArray(value)) return [];
   return value.filter((v): v is IntentSignal =>
     !!v && typeof v === "object"
-    && ["contract_ending", "stated_plan", "tech_change"].includes((v as IntentSignal).kind)
+    && ["contract_ending", "stated_plan", "tech_change", "hiring"].includes((v as IntentSignal).kind)
     && typeof (v as IntentSignal).title === "string"
     && typeof (v as IntentSignal).url === "string" && /^https?:\/\//.test((v as IntentSignal).url)
     && typeof (v as IntentSignal).date === "string");
@@ -164,7 +164,7 @@ export async function listAccounts(userId: string, now = new Date()): Promise<{ 
   const supabase = await createServerSupabaseClient();
   const since = new Date(now.getTime() - TRIGGER_LOOKBACK_DAYS * 86_400_000).toISOString();
   const intentOn = isEnabled("buyer_intent");
-  const [{ data, error }, runs, stallDays, { data: triggerRows, error: tErr }, opportunities] = await Promise.all([
+  const [{ data, error }, runs, stallDays, { data: triggerRows, error: tErr }, { opportunities, offer }] = await Promise.all([
     intentOn
       ? supabase.from("accounts").select(`${ACCOUNT_COLUMNS}, intent_signals`).eq("user_id", userId)
       : supabase.from("accounts").select(ACCOUNT_COLUMNS).eq("user_id", userId),
@@ -176,13 +176,15 @@ export async function listAccounts(userId: string, now = new Date()): Promise<{ 
       .eq("user_id", userId)
       .gte("detected_at", since)
       .order("detected_at", { ascending: false }),
-    // A SAM.gov lookup failure drops only the solicitation reasons, not the list.
+    // A lookup failure drops only the solicitation and hiring reasons, not the list.
     intentOn
-      ? sellerCategory(userId).then((c) => openOpportunities(c, now)).catch((err) => {
-          console.error("[accounts] open solicitations lookup failed:", err);
-          return [];
-        })
-      : Promise.resolve([]),
+      ? sellerCategory(userId)
+          .then(async (c) => ({ opportunities: await openOpportunities(c, now), offer: { keywords: c.keywords, competitors: c.competitors } }))
+          .catch((err) => {
+            console.error("[accounts] open solicitations lookup failed:", err);
+            return { opportunities: [], offer: undefined };
+          })
+      : Promise.resolve({ opportunities: [], offer: undefined }),
   ]);
   if (error) throw error;
   if (tErr) throw tErr;
@@ -234,6 +236,7 @@ export async function listAccounts(userId: string, now = new Date()): Promise<{ 
           storedSignals(row.intent_signals),
           opportunities.filter((o) => isPostingAgency(row.company, o.agencyPath)),
           now,
+          offer,
         ),
       } : {}),
     };

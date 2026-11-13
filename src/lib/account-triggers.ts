@@ -8,12 +8,12 @@ import type { ResearchBundle } from "../types/research.js";
  *
  * "At risk" kinds are the ones that endanger an open deal: a leader leaving,
  * layoffs or a hiring freeze, a budget cut, an acquisition, a new lawsuit,
- * or the account adopting a vendor the seller competes with.
+ * or the account adopting (or hiring for) a vendor the seller competes with.
  */
 
 export type TriggerKind =
   | "leadership_change" | "layoffs" | "budget_cut" | "acquisition" | "lawsuit" | "competitor_adopted"
-  | "funding" | "expansion" | "federal_award" | "tech_added" | "tech_removed";
+  | "funding" | "expansion" | "federal_award" | "tech_added" | "tech_removed" | "hiring_tool";
 
 export interface TriggerCandidate {
   kind: TriggerKind;
@@ -152,6 +152,33 @@ export function detectTriggers(prev: Bundle, next: Bundle, competitors: string[]
     for (const i of before) {
       if (has.has(i.vendor)) continue;
       add({ kind: "tech_removed", atRisk: false, title: `No longer shows ${i.vendor} (${i.category})`, url: i.sourceUrl });
+    }
+  }
+
+  // Hiring for a tool (FEATURE_JOB_POSTINGS): a posting names a tool that
+  // neither the last report's postings nor its tech stack showed. Only when
+  // both reports read the job board, so a first read isn't a change; a
+  // closed posting never triggers (it says nothing about dropping a tool).
+  if (prev.techStack?.jobBoards && next.techStack?.jobBoards) {
+    const known = new Set([
+      ...prev.techStack.items.map((i) => i.vendor.toLowerCase()),
+      ...prev.techStack.jobBoards.flatMap((b) => b.postings.flatMap((p) => p.tools ?? [])).map((t) => t.toLowerCase()),
+    ]);
+    for (const b of next.techStack.jobBoards) {
+      for (const p of b.postings) {
+        for (const tool of p.tools ?? []) {
+          if (known.has(tool.toLowerCase())) continue;
+          known.add(tool.toLowerCase());
+          const competitor = matchesCompetitor(tool, competitors);
+          add({
+            kind: "hiring_tool",
+            atRisk: competitor,
+            title: `Started hiring for ${tool}${competitor ? ", a competitor you replace" : ""} (${p.title})`,
+            url: p.url,
+            eventDate: p.postedAt?.slice(0, 10),
+          });
+        }
+      }
     }
   }
 

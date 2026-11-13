@@ -217,27 +217,37 @@ function around(text: string, index: number, length: number): string {
 }
 
 /**
- * Tools the postings name, one per vendor (the first posting that names it
- * outside a list of options). A sentence that offers several of these tools
- * "such as" or "or similar" doesn't count for any of them.
+ * Where one posting names a tool it uses, with the sentence: not inside a
+ * parenthesised list ("CMMS data (SAP PM, Maximo, JD Edwards)": options,
+ * often the customer's), and not in a sentence that offers several of these
+ * tools "such as" or "or similar".
  */
+function namedIn(p: JobPosting, t: JobTerm, terms: JobTerm[]): string | undefined {
+  const text = `${p.title}\n${p.text}`;
+  const m = t.re.exec(text);
+  if (!m) return undefined;
+  const open = text.lastIndexOf("(", m.index);
+  const close = text.indexOf(")", m.index);
+  if (open >= 0 && close > m.index && !text.slice(open, m.index).includes(")") && text.slice(open, close).includes(",")) return undefined;
+  const quote = around(text, m.index, m[0].length);
+  if (OPTIONS.test(quote) && terms.filter((x) => x.re.test(quote)).length >= 2) return undefined;
+  return quote.length > 160 ? `${quote.slice(0, 159)}…` : quote;
+}
+
+/** Tools the postings name, one per vendor (the first posting that names it). */
 export function toolsFromPostings(postings: JobPosting[], terms: JobTerm[] = JOB_TERMS): PostingTool[] {
   const out = new Map<string, PostingTool>();
   for (const p of postings) {
-    const text = `${p.title}\n${p.text}`;
     for (const t of terms) {
       if (out.has(t.vendor)) continue;
-      const m = t.re.exec(text);
-      if (!m) continue;
-      // Inside a parenthesised list ("CMMS data (SAP PM, Maximo, JD Edwards)"): options, often the customer's.
-      const open = text.lastIndexOf("(", m.index);
-      const close = text.indexOf(")", m.index);
-      if (open >= 0 && close > m.index && !text.slice(open, m.index).includes(")") && text.slice(open, close).includes(",")) continue;
-      const quote = around(text, m.index, m[0].length);
-      const named = terms.filter((x) => x.re.test(quote)).length;
-      if (OPTIONS.test(quote) && named >= 2) continue;
-      out.set(t.vendor, { vendor: t.vendor, category: t.category, posting: p, quote: quote.length > 160 ? `${quote.slice(0, 159)}…` : quote });
+      const quote = namedIn(p, t, terms);
+      if (quote) out.set(t.vendor, { vendor: t.vendor, category: t.category, posting: p, quote });
     }
   }
   return [...out.values()];
+}
+
+/** The tools one posting names (for hiring signals and triggers). */
+export function postingTools(p: JobPosting, terms: JobTerm[] = JOB_TERMS): string[] {
+  return terms.filter((t) => namedIn(p, t, terms) !== undefined).map((t) => t.vendor);
 }
