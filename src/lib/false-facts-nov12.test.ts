@@ -75,3 +75,28 @@ describe("summary news is about the company, not a namesake", () => {
     assert.equal(newsAboutCompany({ headline: "We're hiring", url: "https://www.geckorobotics.com/news/x" }, "Gecko Robotics", "https://geckorobotics.com"), true);
   });
 });
+
+describe("a board member's title survives a second extraction", () => {
+  it("de-duplication keeps the board role and files the other titles as disputed, in either order", async () => {
+    const { cleanLeadership } = await import("./leadership.js");
+    const board = () => ({ name: "Martin Cabrera Jr.", title: "Board member", boardMember: true, sourceUrl: "https://homeboyindustries.org/our-story/our-leaders/" });
+    const other = () => ({ name: "Martin Cabrera Jr.", title: "CEO and Founder", sourceUrl: "https://homeboyindustries.org/our-story/our-leaders/" });
+    for (const list of [[board(), other()], [other(), board()]]) {
+      const [e] = cleanLeadership(list, "homeboyindustries.org").filter((l) => l.name.startsWith("Martin"));
+      assert.equal(e.title, "Board member");
+      assert.equal(e.boardMember, true);
+      assert.deepEqual(e.disputedTitles, ["CEO", "Founder"]);
+    }
+  });
+
+  it("a board member is never who the summary says leads the company", async () => {
+    const { composeSummary } = await import("./summary.js");
+    const s = composeSummary({
+      query: "x", generatedAt: "2026-11-13", company: { name: "Homeboy Industries", website: "https://homeboyindustries.org", description: "Homeboy Industries offers job training and re-entry services in Los Angeles.", founded: "1988", headquarters: "Los Angeles, CA" },
+      leadership: [{ name: "Martin Cabrera Jr.", title: "CEO and Founder", boardMember: true }, { name: "Steve Delgado", title: "Chief Executive Officer" }],
+      products: [], news: [], funding: [], competitors: [], sources: [],
+    } as unknown as Parameters<typeof composeSummary>[0], Date.parse("2026-11-13"));
+    assert.match(s ?? "", /Led by Steve Delgado \(Chief Executive Officer\)\./);
+    assert.doesNotMatch(s ?? "", /Cabrera/);
+  });
+});

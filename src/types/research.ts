@@ -113,6 +113,9 @@ export interface LeadershipEntry {
   /** Titles a weaker source gives them while the company's own pages
    *  give them to someone else (launch fix 37). */
   disputedTitles?: string[];
+  /** Named in a board list with a job at another organization (Nov 13,
+   *  2026): their title is their board role, never an executive one. */
+  boardMember?: boolean;
   /** Brought forward from an earlier run (round 16), never counted as found again. */
   carried?: boolean;
 }

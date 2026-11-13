@@ -70,6 +70,20 @@ export function dedupeLeadership(entries: LeadershipEntry[], subjectDomain?: str
     // (launch fix 66: MJW's Mark Weinstein got titles from dignitymoves.org):
     // only the company's own pages, filings and the press add titles.
     const tier = e.sourceUrl ? sourceTier(e.sourceUrl, subjectDomain) : "primary";
+    if (prev.boardMember || e.boardMember) {
+      // A board list showed this person's job is elsewhere (Nov 13, 2026:
+      // Homeboy's Martin Cabrera Jr. came back "CEO and Founder and Board
+      // member" from a second extraction). The board role stands; other
+      // titles are kept only as disputed.
+      const board = prev.boardMember ? prev : e;
+      const other = prev.boardMember ? e : prev;
+      const extra = roles(other.title).filter((r) => !roles(board.title).some((b) => b.toLowerCase() === r.toLowerCase()) && !/^board member$/i.test(r));
+      prev.title = board.title;
+      prev.boardMember = true;
+      if (board.sourceUrl) prev.sourceUrl = board.sourceUrl;
+      if (extra.length) prev.disputedTitles = [...new Set([...(prev.disputedTitles ?? []), ...extra])];
+      continue;
+    }
     if (tier === "primary" || tier === "press" || tier === "reference" || tier === "directory") prev.title = mergeTitles(prev.title, e.title);
     if (!prev.bio && e.bio) prev.bio = e.bio;
     const score = (u?: string) => (u ? sourceScore(u, subjectDomain) : -1);
@@ -273,6 +287,7 @@ export function settleBoardTitles(entries: LeadershipEntry[], texts: string[], c
     if (titleRoles.length && titleRoles.every((r) => BOARD_ROLE.test(r)) && at >= 0) continue;
     if (at >= 0 && w.slice(at + t.length).trim() === "" && !e.title.includes(",") && e.title.split(/\s+/).length <= 3) continue;
     e.title = office(after.slice(0, 30)) ?? "Board member";
+    e.boardMember = true;
   }
   return entries;
 }

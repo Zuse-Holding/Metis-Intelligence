@@ -88,7 +88,7 @@ export function composeSummary(bundle: ResearchBundle, now = Date.now()): string
   const origin = [c.founded && `Founded in ${c.founded}`, c.headquarters && !c.headquartersUnverified && `based in ${c.headquarters}`].filter(Boolean) as string[];
   if (origin.length) parts.push(`${origin.join(" and ").replace(/^based/, "Based")}.`);
 
-  const chiefs = bundle.leadership.filter((l) => !l.lowConfidence && CHIEF.test(l.title) && !NOT_CHIEF.test(l.title))
+  const chiefs = bundle.leadership.filter((l) => !l.lowConfidence && !l.boardMember && CHIEF.test(l.title) && !NOT_CHIEF.test(l.title))
     .sort((a, b) => seniority(a.title) - seniority(b.title)).slice(0, 2);
   if (chiefs.length) parts.push(`Led by ${chiefs.map((l) => `${l.name} (${l.title})`).join(" and ")}.`);
 
