@@ -936,7 +936,7 @@ CREATE TABLE IF NOT EXISTS account_triggers (
   run_id       UUID        REFERENCES research_runs(id) ON DELETE SET NULL,
   kind         TEXT        NOT NULL CHECK (kind IN (
                  'leadership_change', 'layoffs', 'budget_cut', 'acquisition', 'lawsuit', 'competitor_adopted',
-                 'funding', 'expansion', 'federal_award', 'tech_added', 'tech_removed')),
+                 'funding', 'expansion', 'federal_award', 'tech_added', 'tech_removed', 'hiring_tool')),
   at_risk      BOOLEAN     NOT NULL DEFAULT FALSE,
   title        TEXT        NOT NULL CHECK (char_length(title) BETWEEN 1 AND 300),
   url          TEXT        NOT NULL,
@@ -1017,3 +1017,12 @@ CREATE INDEX IF NOT EXISTS sam_opportunities_naics ON sam_opportunities (naics_c
 CREATE INDEX IF NOT EXISTS sam_opportunities_deadline ON sam_opportunities (response_deadline);
 ALTER TABLE sam_opportunities ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON sam_opportunities FROM anon, authenticated;
+
+-- ============================================================
+-- Job postings, slice 2 (Nov 13, 2026): the "hiring for a tool" trigger.
+-- Apply before merging: the agent server writes the new kind straight away.
+-- ============================================================
+ALTER TABLE account_triggers DROP CONSTRAINT IF EXISTS account_triggers_kind_check;
+ALTER TABLE account_triggers ADD CONSTRAINT account_triggers_kind_check CHECK (kind IN (
+  'leadership_change', 'layoffs', 'budget_cut', 'acquisition', 'lawsuit', 'competitor_adopted',
+  'funding', 'expansion', 'federal_award', 'tech_added', 'tech_removed', 'hiring_tool'));

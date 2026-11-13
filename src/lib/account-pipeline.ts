@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ResearchBundle } from "../types/research.js";
 import { detectTriggers } from "./account-triggers.js";
 import { intentSignals, parseIntentSignals } from "./buyer-intent.js";
+import { agencyPostings, usaJobsConfig } from "./usajobs.js";
 
 /**
  * Agent-server side of the account pipeline (ABM brief §4):
@@ -21,7 +22,7 @@ const likeExact = (s: string) => s.replace(/[\\%_]/g, (c) => `\\${c}`);
 
 export async function recordAccountTriggers(
   supabase: SupabaseClient,
-  args: { userId: string; runId: string; subject: string; bundle: ResearchBundle; intent?: boolean },
+  args: { userId: string; runId: string; subject: string; bundle: ResearchBundle; intent?: boolean; jobs?: boolean },
 ): Promise<number> {
   const { userId, runId, subject, bundle } = args;
   // intent_signals only when buyer intent is on, so the flag off reads
@@ -56,8 +57,10 @@ export async function recordAccountTriggers(
   // logged and never stops the triggers below.
   if (args.intent) {
     const now = new Date();
+    // Agency accounts: their open roles from USAJobs (off without a key).
+    const federalRoles = args.jobs ? (await agencyPostings(subject, usaJobsConfig())) ?? [] : [];
     for (const a of matching) {
-      const signals = intentSignals(bundle, prev?.bundle as ResearchBundle | undefined, parseIntentSignals((a as { intent_signals?: unknown }).intent_signals), now);
+      const signals = intentSignals(bundle, prev?.bundle as ResearchBundle | undefined, parseIntentSignals((a as { intent_signals?: unknown }).intent_signals), now, federalRoles);
       const { error: upErr } = await supabase
         .from("accounts")
         .update({ intent_signals: signals, intent_updated_at: now.toISOString() })

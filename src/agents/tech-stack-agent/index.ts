@@ -2,7 +2,7 @@ import type { Source } from "../../types/research.js";
 import { dohUrl } from "../domain-posture-agent/index.js";
 import { unsafeUrlReason } from "../../lib/public-url.js";
 import { CATEGORY_ORDER, VENDORS, mailMatches, mailRecords, type IpProvider, type Signal, type TechCategory } from "./vendors.js";
-import { boardsFromHtml, careersUrls, readBoard, toolsFromPostings, type Ats, type JobBoard, type JobPosting } from "./job-boards.js";
+import { boardsFromHtml, careersUrls, postingTools, readBoard, toolsFromPostings, type Ats, type JobBoard, type JobPosting } from "./job-boards.js";
 
 /**
  * Tech stack detection, phase 1 (ABM brief §2): which vendors a company
@@ -47,7 +47,7 @@ export interface TechStack {
   subdomainsChecked?: boolean;
   /** Job boards read for postings (FEATURE_JOB_POSTINGS), with their open
    *  roles' titles. Absent when postings weren't checked. */
-  jobBoards?: { ats: Ats; url: string; postings: { title: string; url: string; postedAt?: string }[] }[];
+  jobBoards?: { ats: Ats; url: string; postings: { title: string; url: string; postedAt?: string; tools?: string[] }[] }[];
 }
 
 /** Everything the detector reads. Each field undefined = not gathered. */
@@ -506,7 +506,10 @@ export class TechStackAgent {
       const boards = await this.jobPostings(signals.pageUrl ?? website ?? `https://${domain}/`, signals.html);
       stack.jobBoards = boards.map(({ board, postings }) => ({
         ats: board.ats, url: board.url,
-        postings: postings.slice(0, 50).map((p) => ({ title: p.title, url: p.url, postedAt: p.postedAt })),
+        postings: postings.slice(0, 50).map((p) => {
+          const tools = postingTools(p);
+          return { title: p.title, url: p.url, postedAt: p.postedAt, ...(tools.length ? { tools } : {}) };
+        }),
       }));
       const seen = new Set(items.map((i) => i.vendor.toLowerCase()));
       for (const t of toolsFromPostings(boards.flatMap((b) => b.postings))) {

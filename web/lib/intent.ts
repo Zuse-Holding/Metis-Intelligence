@@ -8,13 +8,19 @@
  *
  * Every reason carries its source link. The level is never shown alone.
  */
+import { isCompetitor } from "./sales";
 
 export interface IntentSignal {
-  kind: "contract_ending" | "stated_plan" | "tech_change";
+  kind: "contract_ending" | "stated_plan" | "tech_change" | "hiring";
   title: string;
   url: string;
   date: string;
+  /** For hiring: the tools the posting names. */
+  tools?: string[];
 }
+
+/** What the seller sells, for matching open roles. */
+export interface OfferMatch { keywords: string[]; competitors: string[] }
 
 export interface Opportunity {
   noticeId: string;
@@ -45,6 +51,7 @@ export const INTENT_REASON_LABELS: Record<IntentReasonKind, string> = {
   contract_ending: "Contract ending",
   stated_plan: "Stated plan",
   tech_change: "Tech stack change",
+  hiring: "Hiring",
 };
 
 export interface IntentReason {
@@ -78,15 +85,19 @@ const sourceFor: Record<IntentSignal["kind"], string> = {
   contract_ending: "USAspending.gov",
   stated_plan: "News",
   tech_change: "Public DNS",
+  hiring: "Job posting",
 };
 
 /**
  * Points: an open solicitation from the account 3; a contract ending within
  * 6 months 3, within 12 months 2, later 1; each stated plan 2 (at most two
- * count); each DNS tech change 1 (at most two count). High at 5, medium at 2.
- * A contract that has already ended, or a deadline that has passed, drops out.
+ * count); each DNS tech change 1 (at most two count); each open role that
+ * matches what the seller sells 2 (at most two count). High at 5, medium
+ * at 2. A contract that has already ended, or a deadline that has passed,
+ * drops out. An open role that doesn't match (no keyword in its title, no
+ * competitor named) isn't shown at all.
  */
-export function scoreIntent(signals: IntentSignal[], rfps: Opportunity[], now = new Date()): Intent {
+export function scoreIntent(signals: IntentSignal[], rfps: Opportunity[], now = new Date(), offer?: OfferMatch): Intent {
   const reasons: (IntentReason & { points: number })[] = [];
 
   for (const o of rfps) {
@@ -104,10 +115,16 @@ export function scoreIntent(signals: IntentSignal[], rfps: Opportunity[], now = 
 
   let plans = 0;
   let tech = 0;
+  let roles = 0;
   for (const s of signals) {
     let points = 0;
     let text = s.title;
-    if (s.kind === "contract_ending") {
+    if (s.kind === "hiring") {
+      const hit = hiringMatch(s, offer);
+      if (!hit) continue;
+      points = roles++ < 2 ? 2 : 0;
+      text = `Hiring: ${s.title}${hit.competitor ? `, names ${hit.competitor}, a competitor you replace` : ""}`;
+    } else if (s.kind === "contract_ending") {
       const end = parseDay(s.date);
       if (!end || end.getTime() < now.getTime()) continue;
       const m = monthsUntil(end, now);
@@ -132,6 +149,19 @@ export function scoreIntent(signals: IntentSignal[], rfps: Opportunity[], now = 
 }
 
 // ── Matching ─────────────────────────────────────────────────────────────────
+
+/**
+ * An open role matches what the seller sells when a keyword is a whole
+ * word in its title ("ERP Implementation Lead" for "ERP implementation"),
+ * or the posting names a tool the seller replaces.
+ */
+export function hiringMatch(s: Pick<IntentSignal, "title" | "tools">, offer: OfferMatch | undefined): { competitor?: string } | null {
+  if (!offer) return null;
+  const competitor = (s.tools ?? []).find((t) => isCompetitor(t, offer.competitors));
+  if (competitor) return { competitor };
+  const title = words(s.title);
+  return offer.keywords.some((k) => { const w = words(k); return w.trim().length > 0 && title.includes(w); }) ? {} : null;
+}
 
 const words = (s: string) => ` ${s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()} `;
 

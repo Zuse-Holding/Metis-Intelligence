@@ -9,18 +9,22 @@ import { matchesOffer, type Opportunity } from "../intent";
 /** Most solicitations a match returns; the feed shows the soonest due. */
 const MAX_OPPORTUNITIES = 200;
 
-export interface SellerCategory { naicsCodes: string[]; keywords: string[] }
+export interface SellerCategory { naicsCodes: string[]; keywords: string[]; competitors: string[] }
 
-/** The user's NAICS codes and keywords from "What you sell", if any. */
+/** The user's NAICS codes, keywords and competitors from "What you sell", if any. */
 export async function sellerCategory(userId: string): Promise<SellerCategory> {
   const supabase = await createServerSupabaseClient();
   const { data, error } = await supabase
     .from("seller_offers")
-    .select("naics_codes, keywords")
+    .select("naics_codes, keywords, competitors")
     .eq("user_id", userId)
     .maybeSingle();
   if (error) throw error;
-  return { naicsCodes: (data?.naics_codes as string[] | undefined) ?? [], keywords: (data?.keywords as string[] | undefined) ?? [] };
+  return {
+    naicsCodes: (data?.naics_codes as string[] | undefined) ?? [],
+    keywords: (data?.keywords as string[] | undefined) ?? [],
+    competitors: (data?.competitors as string[] | undefined) ?? [],
+  };
 }
 
 interface OpportunityRow {

@@ -12,9 +12,13 @@ import type { ResearchBundle } from "../types/research.js";
  *   tech_change      a DNS-backed vendor added or dropped between two reports
  *                    (subdomain and "likely" items vary run to run, and the
  *                    homepage can be blocked, so neither counts)
+ *   hiring           an open role on the company's own job board, with the
+ *                    tools the posting names (FEATURE_JOB_POSTINGS). Stored
+ *                    for every open role; the web app shows and scores only
+ *                    the ones matching what the seller sells.
  */
 
-export type IntentSignalKind = "contract_ending" | "stated_plan" | "tech_change";
+export type IntentSignalKind = "contract_ending" | "stated_plan" | "tech_change" | "hiring";
 
 export interface IntentSignal {
   kind: IntentSignalKind;
@@ -23,6 +27,8 @@ export interface IntentSignal {
   /** ISO date (YYYY-MM-DD where the source gives one): the end date for a
    *  contract, the publication date for news, when it was seen for tech. */
   date: string;
+  /** For hiring: the tools the posting names (job-boards.ts JOB_TERMS). */
+  tools?: string[];
 }
 
 type Bundle = Partial<Pick<ResearchBundle, "news" | "federalSpending" | "sources" | "techStack">>;
@@ -35,6 +41,8 @@ export const PLAN_WINDOW_DAYS = 180;
 /** Tech changes are kept this long across reports. */
 export const TECH_WINDOW_DAYS = 90;
 const MAX_SIGNALS = 30;
+/** Open roles stored per account, after the other signals. */
+export const MAX_HIRING = 40;
 
 const GRANT = /grant|assistance|cooperative/i;
 
@@ -76,7 +84,11 @@ const sameSignal = (a: IntentSignal, b: IntentSignal) => a.kind === b.kind && a.
  * TECH_WINDOW_DAYS carry over (a later report no longer sees the change);
  * everything else is re-read from the latest report.
  */
-export function intentSignals(next: Bundle, prev: Bundle | undefined, kept: IntentSignal[] = [], now = new Date()): IntentSignal[] {
+export function intentSignals(
+  next: Bundle, prev: Bundle | undefined, kept: IntentSignal[] = [], now = new Date(),
+  /** Open roles from elsewhere (USAJobs, for agency accounts). */
+  otherPostings: { title: string; url: string; postedAt?: string; tools?: string[] }[] = [],
+): IntentSignal[] {
   const out: IntentSignal[] = [];
   const add = (s: IntentSignal) => {
     if (!s.url || !s.title.trim()) return;
@@ -122,17 +134,27 @@ export function intentSignals(next: Bundle, prev: Bundle | undefined, kept: Inte
     if (!out.some((o) => sameSignal(o, s))) out.push(s);
   }
 
-  return out.slice(0, MAX_SIGNALS);
+  // Open roles, re-read from every report (a closed role simply drops out).
+  const hiring: IntentSignal[] = [];
+  for (const p of [...(next.techStack?.jobBoards ?? []).flatMap((b) => b.postings), ...otherPostings]) {
+    if (hiring.length >= MAX_HIRING || !/^https?:\/\//.test(p.url) || !p.title.trim()) continue;
+    if (hiring.some((h) => h.title === p.title.trim() && h.url === p.url)) continue;
+    const posted = parseDay(p.postedAt);
+    hiring.push({ kind: "hiring", title: p.title.trim().slice(0, 300), url: p.url, date: isoDay(posted ?? now), ...(p.tools?.length ? { tools: p.tools.slice(0, 10) } : {}) });
+  }
+
+  return [...out.slice(0, MAX_SIGNALS), ...hiring];
 }
 
 /** Stored signals as read back from JSONB; anything malformed is dropped. */
 export function parseIntentSignals(value: unknown): IntentSignal[] {
   if (!Array.isArray(value)) return [];
-  const kinds: IntentSignalKind[] = ["contract_ending", "stated_plan", "tech_change"];
+  const kinds: IntentSignalKind[] = ["contract_ending", "stated_plan", "tech_change", "hiring"];
   return value.filter((v): v is IntentSignal =>
     !!v && typeof v === "object"
     && kinds.includes((v as IntentSignal).kind)
     && typeof (v as IntentSignal).title === "string"
     && typeof (v as IntentSignal).url === "string"
-    && typeof (v as IntentSignal).date === "string");
+    && typeof (v as IntentSignal).date === "string"
+    && ((v as IntentSignal).tools === undefined || (Array.isArray((v as IntentSignal).tools) && (v as IntentSignal).tools!.every((t) => typeof t === "string"))));
 }
