@@ -324,7 +324,7 @@ export class ResearchOrchestrator {
           ? cov.run("domain", () => new DomainPostureAgent().run(domain, siteResult.company.emailDomain), { sources: [] }, (r) => r.posture?.checks.length ?? 0, domain)
           : Promise.resolve({ posture: undefined, sources: [] }),
         checkStack && domain
-          ? cov.run("techstack", () => new TechStackAgent().run(domain, website), { sources: [] }, (r) => r.stack?.items.length ?? 0, domain)
+          ? cov.run("techstack", () => new TechStackAgent().run(domain, website, { jobs: isEnabled("job_postings") }), { sources: [] }, (r) => r.stack?.items.length ?? 0, domain)
           : Promise.resolve({ stack: undefined, sources: [] }),
         related,
       ]);
