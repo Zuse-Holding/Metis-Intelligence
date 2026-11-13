@@ -43,7 +43,7 @@ import { mentionsCompany, normalizeWords } from "../../lib/news-noise.js";
 import { cityOf, detectClosure } from "../../lib/closure.js";
 import { hostOf, tiedToSubject } from "../../lib/entities/subject.js";
 import { isCitable } from "../../lib/source-quality.js";
-import { cleanLeadership, settleSiteTitles, titleNear } from "../../lib/leadership.js";
+import { cleanLeadership, settleBoardTitles, settleSiteTitles, titleNear } from "../../lib/leadership.js";
 
 const FILLER_WORDS = new Set(["a", "an", "and", "the", "of", "for", "to", "in", "on", "at", "by", "with", "our", "&"]);
 const wordSet = (t: string) => new Set(normalizeWords(t).trim().split(" "));
@@ -943,6 +943,11 @@ Return only facts that are explicitly stated in the source text. Omit fields whe
     leadership = leadership.map((l) => (!l.title || /^unknown$/i.test(l.title.trim()) ? { ...l, title: titleNear(l.name, pageTexts) ?? l.title } : l));
     // Two people the site reading calls CEO: only claims its pages back hold (round 11: Patagonia).
     leadership = settleSiteTitles(leadership, pageTexts);
+    // A board list's titles at other firms aren't roles here (Nov 12, 2026: Homeboy).
+    // Whole pages only (the crawled site and the leadership pages read): a
+    // search snippet has no section headings to tell a board list apart.
+    const fullPages = [...(own ? own.pages.map((p) => p.text) : []), ...leadershipPages.filter((t): t is string => !!t)];
+    leadership = settleBoardTitles(leadership, fullPages, companyName, subject.domain);
     leadership = cleanLeadership(leadership, subject.domain);
 
     // Section citations list only pages about this company: its own site,

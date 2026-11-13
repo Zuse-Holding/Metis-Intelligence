@@ -59,6 +59,26 @@ export function quotableHeadline(h: string): string | undefined {
   return t;
 }
 
+const LEGAL_WORDS = new Set(["the", "inc", "incorporated", "llc", "ltd", "corp", "corporation", "co", "company", "holdings", "group", "industries"]);
+
+/**
+ * A news item clearly about this company, not a namesake (Nov 12, 2026: a
+ * jewellery brand's "Movado Group and Gecko among latest exhibitors..."
+ * became Gecko Robotics' latest coverage). Every word of the name, less
+ * legal words, appears in the headline, summary or article ("Graybar
+ * Electric Company" matches "Graybar ... electrical"), or the item is on
+ * the company's own site.
+ */
+export function newsAboutCompany(n: { headline: string; summary?: string; articleText?: string; url?: string }, companyName: string, website?: string): boolean {
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const core = norm(companyName).split(" ").filter((w) => w && !LEGAL_WORDS.has(w));
+  if (core.length === 0) return true;
+  const host = (u?: string) => { try { return new URL(u!).hostname.replace(/^www\./, ""); } catch { return undefined; } };
+  if (website && n.url && host(n.url) === host(website)) return true;
+  const words = ` ${norm(`${n.headline} ${n.summary ?? ""} ${(n.articleText ?? "").slice(0, 4000)}`)} `;
+  return core.every((w) => words.includes(` ${w.length > 6 ? w.slice(0, 6) : w}`));
+}
+
 export function composeSummary(bundle: ResearchBundle, now = Date.now()): string | undefined {
   const c = bundle.company;
   const parts: string[] = [];
@@ -98,7 +118,8 @@ export function composeSummary(bundle: ResearchBundle, now = Date.now()): string
   // The latest development: an acquisition, or the newest dated news item.
   const action = (bundle.corporateActions ?? []).filter((a) => a.kind === "Acquisition" && a.date && Date.parse(a.date) >= now - 2 * 365 * 86_400_000)[0];
   const news = bundle.news.filter((n) => n.date && !n.solicitation && Date.parse(n.date) >= now - 180 * 86_400_000 && quotableHeadline(n.headline)
-    && !PROMO.test(n.headline) && !TRAVEL.test(n.headline) && !isShoppingOrQuote(n.headline, n.url) && !isPersonalLifeNews(n.headline, n.summary, n.url))
+    && !PROMO.test(n.headline) && !TRAVEL.test(n.headline) && !isShoppingOrQuote(n.headline, n.url) && !isPersonalLifeNews(n.headline, n.summary, n.url)
+    && newsAboutCompany(n, c.name, c.website))
     .sort((a, b) => Date.parse(b.date!) - Date.parse(a.date!))[0];
   if (action) parts.push(`It acquired ${action.name} (${action.date}).`);
   else if (news) parts.push(`Most recent coverage: "${quotableHeadline(news.headline)}" (${news.date}).`);

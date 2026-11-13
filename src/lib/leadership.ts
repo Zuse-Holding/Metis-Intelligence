@@ -193,6 +193,90 @@ export function settleSiteTitles(entries: LeadershipEntry[], texts: string[]): L
   return entries.filter((e) => !dropped.has(e));
 }
 
+// ── Board members' outside titles ────────────────────────────────────────────
+
+const BOARD_HEADING = /\b(board of (directors|trustees|governors)|our board|board members|trustees)\b/i;
+const STAFF_HEADING = /\b(leadership team|executive team|senior leadership|management team|our team|our staff|staff|executives|officers)\b/i;
+const BOARD_ROLE = /^(board (chair\w*|member|director)|vice[- ]chair\w*|chair\w*|secretary|treasurer|trustee|independent director|director|board member)$/i;
+const BOARD_OFFICE = /\b(board chair(man|woman|person)?|vice[- ]chair(man|woman|person)?|chair(man|woman|person)?|secretary|treasurer)\b/i;
+const NAME_GENERIC = new Set(["company", "companies", "corporation", "industries", "international", "group", "holdings", "services", "systems", "solutions", "technologies", "foundation", "global", "partners", "enterprises"]);
+
+const escName = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
+
+/** Words that say a line is about the subject: distinctive name words and the domain's label. */
+function subjectMarks(companyName: string, domain?: string): string[] {
+  const words = companyName.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 4 && !NAME_GENERIC.has(w));
+  const label = domain?.toLowerCase().replace(/^www\./, "").split(".")[0];
+  return [...new Set([...words, ...(label && label.length >= 4 ? [label] : [])])];
+}
+
+/** The [start, end) span of each board section: from a board heading to the next staff heading. */
+function boardSpans(text: string): [number, number][] {
+  const spans: [number, number][] = [];
+  const re = new RegExp(BOARD_HEADING.source, "gi");
+  for (let m = re.exec(text); m; m = re.exec(text)) {
+    const from = m.index + m[0].length;
+    const next = text.slice(from).search(STAFF_HEADING);
+    spans.push([m.index, next < 0 ? text.length : from + next]);
+  }
+  return spans;
+}
+
+/**
+ * Board lists give each member's job elsewhere (Nov 12, 2026: Homeboy's
+ * leaders page lists "Martin Cabrera Jr. / CEO and Founder / Cabrera
+ * Capital Markets", which the summary read as Homeboy's CEO). For each
+ * person in a board section, what the page writes after their name, up to
+ * the next person, decides:
+ *   - it names the company ("Founder / Homeboy Industries"): the title stands;
+ *   - the title is a board role ("Board Chair"): it stands;
+ *   - a bare title with nothing after it ("Jake Loosararian CEO"): it stands;
+ *   - otherwise (another firm, or a title the page doesn't give there):
+ *     the board office written right after the name ("Kelli Bernard, Vice
+ *     Chair"), else "Board member".
+ */
+export function settleBoardTitles(entries: LeadershipEntry[], texts: string[], companyName: string, domain?: string): LeadershipEntry[] {
+  const marks = subjectMarks(companyName, domain);
+  const flat = (s: string) => ` ${s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()} `;
+  // Not \b: a name can end in "Jr." and a dot has no word boundary after it.
+  const nameRe = (name: string, flags: string) => new RegExp(`(?<![\\w])${escName(name)}(?![\\w])`, flags);
+  const others = (e: LeadershipEntry) => entries.filter((o) => o !== e).map((o) => nameRe(o.name, "i"));
+  const office = (s: string) => s.match(BOARD_OFFICE)?.[0].toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+  for (const e of entries) {
+    const re = nameRe(e.name, "gi");
+    const stops = others(e);
+    let after: string | undefined;
+    for (const t of texts) {
+      const spans = boardSpans(t);
+      for (let m = re.exec(t); m && after === undefined; m = re.exec(t)) {
+        if (!spans.some(([a, b]) => m!.index >= a && m!.index < b)) continue;
+        // What follows the name, up to the next listed person.
+        let w = t.slice(m.index + m[0].length, m.index + m[0].length + 220);
+        for (const s of stops) {
+          const i = w.search(s);
+          if (i >= 0) w = w.slice(0, i);
+        }
+        after = w;
+      }
+      re.lastIndex = 0;
+      if (after !== undefined) break;
+    }
+    if (after === undefined) continue;
+    const w = flat(after);
+    const t = flat(e.title);
+    const at = w.indexOf(t);
+    // The company named in the title or just after it, not further on
+    // (that's the next person's line when they weren't extracted).
+    const zone = (at >= 0 ? t + w.slice(at + t.length, at + t.length + 25) : w.slice(0, 40)).replace(/[^a-z0-9]+/g, "");
+    if (marks.some((m) => zone.includes(m))) continue;
+    const titleRoles = roles(e.title);
+    if (titleRoles.length && titleRoles.every((r) => BOARD_ROLE.test(r)) && at >= 0) continue;
+    if (at >= 0 && w.slice(at + t.length).trim() === "" && !e.title.includes(",") && e.title.split(/\s+/).length <= 3) continue;
+    e.title = office(after.slice(0, 30)) ?? "Board member";
+  }
+  return entries;
+}
+
 const SOLE_FOUNDER = /^(the )?founder$/i;
 
 /**
