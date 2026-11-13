@@ -660,7 +660,7 @@ ALTER TABLE kg_entity_identifiers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE kg_match_reviews      ENABLE ROW LEVEL SECURITY;
 
 -- Read-only for the owner. The service role writes; decisions go through
--- kg_decide_match below, so the log can't be edited by hand.
+-- kg_decide_match below (server routes only), so the log can't be edited by hand.
 DROP POLICY IF EXISTS "Users read own identifiers" ON kg_entity_identifiers;
 CREATE POLICY "Users read own identifiers"
   ON kg_entity_identifiers FOR SELECT USING (auth.uid() = user_id);
@@ -668,17 +668,26 @@ DROP POLICY IF EXISTS "Users read own match reviews" ON kg_match_reviews;
 CREATE POLICY "Users read own match reviews"
   ON kg_match_reviews FOR SELECT USING (auth.uid() = user_id);
 
--- Confirm or reject a possible match, atomically, as the signed-in user.
+-- Confirm or reject a possible match, atomically, for one user.
 -- Confirm folds the newer entity into the existing one (relationships and
 -- identifiers move over) and is refused when their identifiers conflict.
-CREATE OR REPLACE FUNCTION kg_decide_match(p_review_id UUID, p_decision TEXT)
+-- Every statement is limited to p_user_id's rows, and it returns nothing.
+--
+-- Service role only (Nov 12, 2026): the web routes under
+-- /api/knowledge-graph/matches take the user id from the session and
+-- rate-limit each user before calling it, so it can't be called straight
+-- from the browser with a user's token. Replaces the earlier
+-- kg_decide_match(p_review_id, p_decision), which read auth.uid() and was
+-- callable by any signed-in user. Apply the CREATE before merging the web
+-- change and the DROP after it has deployed, so decisions never break.
+CREATE OR REPLACE FUNCTION kg_decide_match(p_user_id UUID, p_review_id UUID, p_decision TEXT)
 RETURNS VOID
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public
 AS $$
 DECLARE
-  uid UUID := auth.uid();
+  uid UUID := p_user_id;
   r   kg_match_reviews%ROWTYPE;
 BEGIN
   IF uid IS NULL THEN RAISE EXCEPTION 'Not signed in'; END IF;
@@ -716,8 +725,9 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION kg_decide_match(UUID, TEXT) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION kg_decide_match(UUID, TEXT) TO authenticated;
+REVOKE ALL ON FUNCTION kg_decide_match(UUID, UUID, TEXT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION kg_decide_match(UUID, UUID, TEXT) TO service_role;
+DROP FUNCTION IF EXISTS kg_decide_match(UUID, TEXT);
 
 -- ============================================================
 -- Self-exclusion list (Feature 6): run before FEATURE_SELF_EXCLUSION.
