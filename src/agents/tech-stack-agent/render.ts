@@ -18,10 +18,13 @@ export function techSummary(t: TechStack): string {
   const n = t.items.length;
   const likely = t.items.filter((i) => i.confidence === "likely").length;
   const fromJobs = t.items.some((i) => i.layer === "jobs");
+  const fromMentions = t.items.some((i) => i.layer === "mentions");
+  const likelyFrom = ["subdomain names", fromJobs ? "job postings" : "", fromMentions ? "vendor customer stories" : ""].filter(Boolean);
+  const likelyText = likelyFrom.length === 1 ? "subdomain names only" : `${likelyFrom.slice(0, -1).join(", ")} or ${likelyFrom[likelyFrom.length - 1]}`;
   const found = n === 0 ? "no tools visible in public records"
-    : `${n} tool${n === 1 ? "" : "s"} found${likely ? ` (${likely} likely, from ${fromJobs ? "subdomain names or job postings" : "subdomain names only"})` : ""}`;
+    : `${n} tool${n === 1 ? "" : "s"} found${likely ? ` (${likely} likely, from ${likelyText})` : ""}`;
   const boards = (t.jobBoards ?? []).map((b) => `job postings on ${b.ats}`);
-  const sources = ["public DNS", t.websiteUnavailable ? "" : "the homepage", t.subdomainsChecked ? "certificate logs" : "", ...boards].filter(Boolean);
+  const sources = ["public DNS", t.websiteUnavailable ? "" : "the homepage", t.subdomainsChecked ? "certificate logs" : "", ...boards, fromMentions ? "vendor customer stories" : ""].filter(Boolean);
   const list = sources.length > 1 ? `${sources.slice(0, -1).join(", ")} and ${sources[sources.length - 1]}` : sources[0];
   const scope = `From ${list}.${t.websiteUnavailable ? ` The homepage couldn't be read (${t.websiteUnavailable}).` : ""}`;
   return `${t.domain}: ${found}. ${scope} Internal tools often leave no public trace, so a missing category means not visible, not not used.`;

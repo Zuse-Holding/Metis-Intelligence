@@ -3,24 +3,28 @@
  * source for internal tools DNS can't see (ERP, accounting, construction
  * software, data warehouses).
  *
- * Only job boards built to be read, through their public, keyless APIs:
- *   Greenhouse  https://boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true
- *   Lever       https://api.lever.co/v0/postings/{site}?mode=json
- *   Ashby       https://api.ashbyhq.com/posting-api/job-board/{name}
- * No LinkedIn, Indeed or other scraping.
+ * Only job boards built to be read, through the public, keyless JSON their
+ * own career pages use:
+ *   Greenhouse       https://boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true
+ *   Lever            https://api.lever.co/v0/postings/{site}?mode=json
+ *   Ashby            https://api.ashbyhq.com/posting-api/job-board/{name}
+ *   Workday          POST https://{tenant}.{wdN}.myworkdayjobs.com/wday/cxs/{tenant}/{site}/jobs, then each posting
+ *   SmartRecruiters  https://api.smartrecruiters.com/v1/companies/{id}/postings, then each posting
+ *   Workable         POST https://apply.workable.com/api/v3/accounts/{name}/jobs, then each posting
+ * The last three list titles only, so the newest MAX_DETAILS postings are
+ * read one by one. No LinkedIn, Indeed or other scraping; iCIMS has no
+ * JSON feed, so it isn't read.
  *
  * The board is taken only from a link on the company's own homepage or
  * careers page, never guessed from the name, so a namesake's board can't
- * be read as this company's. Large companies on Workday or iCIMS have no
- * public API, so their postings aren't read: coverage is mostly startups
- * and mid-market companies.
+ * be read as this company's.
  *
  * A tool named in a posting is "likely", not confirmed: it says they hire
  * for it, which usually means they run it. Each item quotes the posting.
  */
 import type { TechCategory } from "./vendors.js";
 
-export type Ats = "Greenhouse" | "Lever" | "Ashby";
+export type Ats = "Greenhouse" | "Lever" | "Ashby" | "Workday" | "SmartRecruiters" | "Workable";
 
 export interface JobBoard { ats: Ats; token: string; url: string }
 
@@ -45,9 +49,13 @@ const BOARD_PATTERNS: { ats: Ats; re: RegExp; url: (t: string) => string }[] = [
   { ats: "Greenhouse", re: new RegExp(`(?:job-)?boards(?:\\.eu)?\\.greenhouse\\.io/(?:embed/job_board(?:/js)?\\?for=)?${TOKEN}`, "gi"), url: (t) => `https://boards.greenhouse.io/${t}` },
   { ats: "Lever", re: new RegExp(`jobs(?:\\.eu)?\\.lever\\.co/${TOKEN}`, "gi"), url: (t) => `https://jobs.lever.co/${t}` },
   { ats: "Ashby", re: new RegExp(`jobs\\.ashbyhq\\.com/${TOKEN}`, "gi"), url: (t) => `https://jobs.ashbyhq.com/${t}` },
+  // Token "tenant.wdN/site", e.g. "salesforce.wd12/External_Career_Site".
+  { ats: "Workday", re: /\b([a-z0-9-]{2,60}\.wd\d{1,3})\.myworkdayjobs\.com\/(?:[a-z]{2}-[A-Z]{2}\/)?([A-Za-z0-9_-]{2,80})/g, url: (t) => { const [host, site] = t.split("/"); return `https://${host}.myworkdayjobs.com/${site}`; } },
+  { ats: "SmartRecruiters", re: new RegExp(`(?:jobs|careers)\\.smartrecruiters\\.com/${TOKEN}`, "gi"), url: (t) => `https://jobs.smartrecruiters.com/${t}` },
+  { ats: "Workable", re: new RegExp(`apply\\.workable\\.com/${TOKEN}`, "gi"), url: (t) => `https://apply.workable.com/${t}/` },
 ];
 // Path words that follow the host but aren't a board name.
-const NOT_TOKEN = /^(embed|js|api|v\d|jobs|job_board|static|assets|images|favicon\.ico|robots\.txt)$/i;
+const NOT_TOKEN = /^(embed|js|api|v\d|j|jobs|job|job_board|static|assets|images|favicon\.ico|robots\.txt|wday|login|search)$/i;
 
 /** Job boards linked from a page's HTML, one per ATS (the first link wins). */
 export function boardsFromHtml(html: string): JobBoard[] {
@@ -55,8 +63,9 @@ export function boardsFromHtml(html: string): JobBoard[] {
   for (const p of BOARD_PATTERNS) {
     if (out.some((b) => b.ats === p.ats)) continue;
     for (const m of html.matchAll(p.re)) {
-      const token = m[1].replace(/[.]+$/, "");
-      if (NOT_TOKEN.test(token)) continue;
+      const last = (m[2] ?? m[1]).replace(/[.]+$/, "");
+      if (NOT_TOKEN.test(last)) continue;
+      const token = m[2] ? `${m[1].toLowerCase()}/${last}` : last;
       out.push({ ats: p.ats, token, url: p.url(token) });
       break;
     }
@@ -135,8 +144,117 @@ export function parsePostings(ats: Ats, data: unknown): JobPosting[] {
   return out.slice(0, MAX_POSTINGS);
 }
 
+// ── Boards that list titles only: list, then read each posting ───────────────
+
+/** Postings read one by one on Workday, SmartRecruiters and Workable. */
+export const MAX_DETAILS = 20;
+
+// Starts with a letter or digit, so never "." or "..".
+const SAFE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$/;
+const posting = (board: Ats, title: string, url: string, postedAt: string | undefined, text: string): JobPosting | undefined =>
+  title.trim() && isHttp(url) ? { title: title.trim().slice(0, 200), url, postedAt, text: text.slice(0, MAX_TEXT), board } : undefined;
+
+/** "salesforce.wd12/External_Career_Site" to its API base, or undefined if malformed. */
+export function workdayBase(token: string): string | undefined {
+  const parts = token.split("/");
+  const [host, site] = parts;
+  if (parts.length !== 2 || !host || !site || !/^[a-z0-9-]{2,60}\.wd\d{1,3}$/.test(host) || !SAFE.test(site)) return undefined;
+  return `https://${host}.myworkdayjobs.com/wday/cxs/${host.split(".")[0]}/${site}`;
+}
+
+export function parseWorkdayList(data: unknown): string[] {
+  const list = (data as { jobPostings?: unknown[] })?.jobPostings;
+  return (Array.isArray(list) ? list : []).map((j) => str((j as Record<string, unknown>).externalPath)).filter((p) => /^\/job\/[^?#\s]+$/.test(p));
+}
+
+export function parseWorkdayPosting(data: unknown): JobPosting | undefined {
+  const r = (data as { jobPostingInfo?: Record<string, unknown> })?.jobPostingInfo;
+  if (!r) return undefined;
+  return posting("Workday", str(r.title), str(r.externalUrl), isoOf(r.startDate), plainText(str(r.jobDescription)));
+}
+
+export function parseSmartRecruitersList(data: unknown): string[] {
+  const list = (data as { content?: unknown[] })?.content;
+  return (Array.isArray(list) ? list : []).map((j) => str((j as Record<string, unknown>).id)).filter((id) => SAFE.test(id));
+}
+
+export function parseSmartRecruitersPosting(data: unknown): JobPosting | undefined {
+  const r = data as Record<string, unknown> | null;
+  if (!r || typeof r !== "object") return undefined;
+  const sections = ((r.jobAd as { sections?: Record<string, { text?: unknown }> } | undefined)?.sections) ?? {};
+  const text = ["jobDescription", "qualifications", "additionalInformation"].map((k) => plainText(str(sections[k]?.text))).filter(Boolean).join("\n");
+  const url = str(r.postingUrl);
+  return /^https:\/\/(jobs|careers)\.smartrecruiters\.com\//.test(url) ? posting("SmartRecruiters", str(r.name), url, isoOf(r.releasedDate), text) : undefined;
+}
+
+export function parseWorkableList(data: unknown): string[] {
+  const list = (data as { results?: unknown[] })?.results;
+  return (Array.isArray(list) ? list : [])
+    .filter((j) => (j as Record<string, unknown>).state === undefined || (j as Record<string, unknown>).state === "published")
+    .map((j) => str((j as Record<string, unknown>).shortcode)).filter((s) => SAFE.test(s));
+}
+
+export function parseWorkablePosting(account: string, data: unknown): JobPosting | undefined {
+  const r = data as Record<string, unknown> | null;
+  if (!r || typeof r !== "object" || !SAFE.test(str(r.shortcode))) return undefined;
+  const text = [r.description, r.requirements, r.benefits].map((x) => plainText(str(x))).filter(Boolean).join("\n");
+  return posting("Workable", str(r.title), `https://apply.workable.com/${encodeURIComponent(account)}/j/${str(r.shortcode)}/`, isoOf(r.published), text);
+}
+
+async function getJson(fetchImpl: typeof fetch, url: string, init: RequestInit = {}): Promise<unknown | null> {
+  try {
+    const res = await fetchImpl(url, { ...init, headers: { Accept: "application/json", ...(init.headers ?? {}) }, signal: AbortSignal.timeout(15_000) });
+    if (!res.ok || !(res.headers.get("content-type") ?? "").includes("json")) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+/** Reads each posting, five at a time; a posting that fails is skipped. */
+async function details(ids: string[], read: (id: string) => Promise<JobPosting | undefined>): Promise<JobPosting[]> {
+  const out: JobPosting[] = [];
+  const queue = ids.slice(0, MAX_DETAILS);
+  await Promise.all(Array.from({ length: 5 }, async () => {
+    for (let id = queue.shift(); id !== undefined; id = queue.shift()) {
+      const p = await read(id).catch(() => undefined);
+      if (p) out.push(p);
+    }
+  }));
+  return out;
+}
+
+async function readListedBoard(b: JobBoard, fetchImpl: typeof fetch): Promise<JobPosting[] | null> {
+  const post = (body: unknown): RequestInit => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if (b.ats === "Workday") {
+    const base = workdayBase(b.token);
+    if (!base) return null;
+    const list = await getJson(fetchImpl, `${base}/jobs`, post({ limit: MAX_DETAILS, offset: 0, appliedFacets: {}, searchText: "" }));
+    if (list === null) return null;
+    const host = `https://${b.token.split("/")[0]}.myworkdayjobs.com/`;
+    return details(parseWorkdayList(list), async (path) => {
+      const p = parseWorkdayPosting(await getJson(fetchImpl, `${base}${path}`));
+      return p && p.url.startsWith(host) ? p : undefined;
+    });
+  }
+  if (!SAFE.test(b.token)) return null;
+  const t = encodeURIComponent(b.token);
+  if (b.ats === "SmartRecruiters") {
+    const list = await getJson(fetchImpl, `https://api.smartrecruiters.com/v1/companies/${t}/postings?limit=${MAX_DETAILS}`);
+    if (list === null) return null;
+    return details(parseSmartRecruitersList(list), async (id) => parseSmartRecruitersPosting(await getJson(fetchImpl, `https://api.smartrecruiters.com/v1/companies/${t}/postings/${encodeURIComponent(id)}`)));
+  }
+  const list = await getJson(fetchImpl, `https://apply.workable.com/api/v3/accounts/${t}/jobs`, post({ query: "", location: [], department: [], worktype: [], remote: [] }));
+  if (list === null) return null;
+  return details(parseWorkableList(list), async (code) => parseWorkablePosting(b.token, await getJson(fetchImpl, `https://apply.workable.com/api/v2/accounts/${t}/jobs/${encodeURIComponent(code)}`)));
+}
+
+/** Boards read posting by posting; off unless FEATURE_MORE_JOB_BOARDS=on. */
+export const LISTED: Ats[] = ["Workday", "SmartRecruiters", "Workable"];
+
 /** Reads one board. Null when it doesn't answer with postings. */
 export async function readBoard(b: JobBoard, fetchImpl: typeof fetch = fetch): Promise<JobPosting[] | null> {
+  if (LISTED.includes(b.ats)) return readListedBoard(b, fetchImpl);
   try {
     const res = await fetchImpl(apiUrl(b), { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(15_000) });
     if (!res.ok || !(res.headers.get("content-type") ?? "").includes("json")) return null;

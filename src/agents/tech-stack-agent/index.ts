@@ -2,7 +2,9 @@ import type { Source } from "../../types/research.js";
 import { dohUrl } from "../domain-posture-agent/index.js";
 import { unsafeUrlReason } from "../../lib/public-url.js";
 import { CATEGORY_ORDER, VENDORS, mailMatches, mailRecords, type IpProvider, type Signal, type TechCategory } from "./vendors.js";
-import { boardsFromHtml, careersUrls, postingTools, readBoard, toolsFromPostings, type Ats, type JobBoard, type JobPosting } from "./job-boards.js";
+import { boardsFromHtml, careersUrls, LISTED, postingTools, readBoard, toolsFromPostings, type Ats, type JobBoard, type JobPosting } from "./job-boards.js";
+import { isEnabled } from "../../lib/flags.js";
+import { mentionQuery, mentionsFrom } from "./mentions.js";
 
 /**
  * Tech stack detection, phase 1 (ABM brief §2): which vendors a company
@@ -22,7 +24,7 @@ import { boardsFromHtml, careersUrls, postingTools, readBoard, toolsFromPostings
 export type Confidence = "confirmed" | "likely";
 /** "subdomain": found through the company's subdomains in certificate logs,
  *  which depend on a log service answering (so triggers skip them when it didn't). */
-export type Layer = "dns" | "website" | "subdomain" | "jobs";
+export type Layer = "dns" | "website" | "subdomain" | "jobs" | "mentions";
 
 export interface TechItem {
   vendor: string;
@@ -484,12 +486,14 @@ export class TechStackAgent {
    * link, so a namesake's board is never used.
    */
   async jobPostings(homepageUrl: string | undefined, html: string | undefined): Promise<{ board: JobBoard; postings: JobPosting[] }[]> {
-    let boards = boardsFromHtml(html ?? "");
+    const more = isEnabled("more_job_boards");
+    const found = (h: string) => boardsFromHtml(h).filter((b) => more || !LISTED.includes(b.ats));
+    let boards = found(html ?? "");
     if (!boards.length && homepageUrl) {
       for (const url of careersUrls(homepageUrl, html)) {
         const page = await fetchHomepage(url);
         if ("error" in page || !page.html) continue;
-        boards = boardsFromHtml(page.html);
+        boards = found(page.html);
         if (boards.length) break;
       }
     }
@@ -497,7 +501,14 @@ export class TechStackAgent {
     return read.filter((r): r is { board: JobBoard; postings: JobPosting[] } => r.postings !== null);
   }
 
-  async run(domain: string, website?: string, opts: { jobs?: boolean } = {}): Promise<{ stack?: TechStack; sources: Source[] }> {
+  async run(
+    domain: string, website?: string,
+    opts: {
+      jobs?: boolean;
+      /** Vendor customer stories that name the company (FEATURE_PUBLIC_MENTIONS); one search. */
+      mentions?: { company: string; search: (query: string, count: number) => Promise<{ title: string; url: string }[]> };
+    } = {},
+  ): Promise<{ stack?: TechStack; sources: Source[] }> {
     const signals = await this.gather(domain, website);
     const nothingGathered = signals.mx === undefined && signals.txt === undefined && signals.ns === undefined && !signals.headers;
     if (nothingGathered) return { sources: [] };
@@ -520,6 +531,19 @@ export class TechStackAgent {
           vendor: t.vendor, category: t.category, confidence: "likely", layer: "jobs",
           evidence: `Job posting "${t.posting.title}": "${t.quote}"`,
           sourceName: `Job posting (${t.posting.board})`, sourceUrl: t.posting.url,
+        });
+      }
+      items.sort((a, b) => CATEGORY_ORDER.indexOf(a.category) - CATEGORY_ORDER.indexOf(b.category));
+    }
+    if (opts.mentions) {
+      const results = await opts.mentions.search(mentionQuery(opts.mentions.company), 10).catch(() => []);
+      const seen = new Set(items.map((i) => i.vendor.toLowerCase()));
+      for (const m of mentionsFrom(results, opts.mentions.company, domain)) {
+        if (seen.has(m.vendor.toLowerCase())) continue;
+        items.push({
+          vendor: m.vendor, category: m.category, confidence: "likely", layer: "mentions",
+          evidence: `${m.vendor} customer story: "${m.title}"`,
+          sourceName: `${m.vendor} customer story`, sourceUrl: m.url,
         });
       }
       items.sort((a, b) => CATEGORY_ORDER.indexOf(a.category) - CATEGORY_ORDER.indexOf(b.category));
