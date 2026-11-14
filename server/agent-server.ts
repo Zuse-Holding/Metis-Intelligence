@@ -1086,7 +1086,7 @@ app.post("/research", async (req, res) => {
     // Account pipeline: what changed since the last report on a saved
     // account. After the response, so it never delays or fails the run.
     if (type === "company" && !(bundle as { partial?: boolean }).partial) {
-      recordAccountTriggers(supabase, { userId, runId, subject, bundle: bundle as ResearchBundle, intent: isEnabled("buyer_intent"), jobs: isEnabled("job_postings") })
+      recordAccountTriggers(supabase, { userId, runId, subject, bundle: bundle as ResearchBundle, intent: isEnabled("buyer_intent"), jobs: isEnabled("job_postings"), champion: isEnabled("champion") })
         .then((n) => { if (n) console.log(`[accounts] run ${runId}: ${n} trigger(s)`); })
         .catch((err) => console.error(`[accounts] run ${runId}: triggers failed:`, err instanceof Error ? err.message : err));
     }

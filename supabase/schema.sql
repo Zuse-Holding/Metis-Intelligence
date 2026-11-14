@@ -936,7 +936,7 @@ CREATE TABLE IF NOT EXISTS account_triggers (
   run_id       UUID        REFERENCES research_runs(id) ON DELETE SET NULL,
   kind         TEXT        NOT NULL CHECK (kind IN (
                  'leadership_change', 'layoffs', 'budget_cut', 'acquisition', 'lawsuit', 'competitor_adopted',
-                 'funding', 'expansion', 'federal_award', 'tech_added', 'tech_removed', 'hiring_tool')),
+                 'funding', 'expansion', 'federal_award', 'tech_added', 'tech_removed', 'hiring_tool', 'champion_left')),
   at_risk      BOOLEAN     NOT NULL DEFAULT FALSE,
   title        TEXT        NOT NULL CHECK (char_length(title) BETWEEN 1 AND 300),
   url          TEXT        NOT NULL,
@@ -1042,3 +1042,14 @@ CREATE INDEX IF NOT EXISTS account_triggers_unalerted ON account_triggers (user_
 -- deploying: both write this column.
 -- ============================================================
 ALTER TABLE company_profiles ADD COLUMN IF NOT EXISTS tech_seen JSONB;
+
+-- ============================================================
+-- Champion (FEATURE_CHAMPION): the person at the account backing the
+-- deal, named by the user. Raises 'champion_left' (at risk) when they
+-- drop off the company's leadership list. Apply before turning it on.
+-- ============================================================
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS champion TEXT CHECK (champion IS NULL OR char_length(champion) <= 120);
+ALTER TABLE account_triggers DROP CONSTRAINT IF EXISTS account_triggers_kind_check;
+ALTER TABLE account_triggers ADD CONSTRAINT account_triggers_kind_check CHECK (kind IN (
+  'leadership_change', 'layoffs', 'budget_cut', 'acquisition', 'lawsuit', 'competitor_adopted',
+  'funding', 'expansion', 'federal_award', 'tech_added', 'tech_removed', 'hiring_tool', 'champion_left'));
