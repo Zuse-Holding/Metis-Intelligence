@@ -624,7 +624,7 @@ export class ResearchOrchestrator {
       const composed = composeSummary(bundle);
       if (composed) bundle.company.summary = composed;
     }
-    if (cacheOn && domain) await saveProfile(profileFrom(bundle, domain, savedProfile));
+    if (cacheOn && domain) await saveProfile(profileFrom(bundle, domain, savedProfile, { techSeen: isEnabled("tech_seen") }));
 
     return {
       bundle,

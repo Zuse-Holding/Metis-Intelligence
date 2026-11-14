@@ -15,7 +15,13 @@ interface Props {
   runId?: string;
 }
 
-interface PeerGap { vendor: string; category: string; of: number; peers: { name: string; evidence: string; url: string }[] }
+interface PeerGap { vendor: string; category: string; of: number; peers: { name: string; evidence: string; url: string; since?: string }[] }
+
+/** "2026-10-03" as "Oct 3, 2026". */
+const shortDay = (iso: string) => {
+  const d = new Date(`${iso.slice(0, 10)}T00:00:00Z`);
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+};
 interface PeerResult { gaps: PeerGap[]; compared: { name: string; domain: string; tools: number }[]; skipped: string[]; reason?: string }
 
 const WEAK_SPOT_LABELS: Record<string, string> = {
@@ -193,7 +199,7 @@ export default function SalesTab({ subject, bundle, runId }: Props) {
                           href={i.sourceUrl}
                           target="_blank"
                           rel="noopener noreferrer"
-                          title={`${i.confidence === "likely" ? "Likely, not confirmed. " : ""}${i.evidence} (${i.sourceName})`}
+                          title={`${i.confidence === "likely" ? "Likely, not confirmed. " : ""}${i.evidence} (${i.sourceName})${i.firstSeen ? `. First seen ${shortDay(i.firstSeen)}` : ""}`}
                           className={`${styles.vendor} ${i.confidence === "likely" ? styles.vendorLikely : ""} ${offer && isCompetitor(i.vendor, offer.competitors) ? styles.vendorCompetitor : ""}`}
                         >
                           {i.vendor}{i.confidence === "likely" && <span className={styles.likelyMark}> · likely</span>}
@@ -203,6 +209,9 @@ export default function SalesTab({ subject, bundle, runId }: Props) {
                   </div>
                 ))}
               </div>
+            )}
+            {stack.items.some((i) => i.firstSeen) && (
+              <p className={styles.note}>Hover a tool for where it was found and when we first saw it.</p>
             )}
             {stack.websiteUnavailable && (
               <p className={styles.note}>From public DNS only; the homepage couldn&apos;t be read ({stack.websiteUnavailable}).</p>
@@ -230,8 +239,11 @@ export default function SalesTab({ subject, bundle, runId }: Props) {
                     <li key={g.vendor}>
                       <strong>{g.peers.length} of {g.of}</strong> peers use <strong>{g.vendor}</strong> ({g.category}); {subject.split(" · ")[0]} doesn&apos;t show it:{" "}
                       {g.peers.map((p, i) => (
-                        <span key={p.name}>{i > 0 && ", "}<a href={p.url} target="_blank" rel="noopener noreferrer" title={p.evidence} className={styles.source}>{p.name}</a></span>
+                        <span key={p.name}>{i > 0 && ", "}<a href={p.url} target="_blank" rel="noopener noreferrer" title={p.evidence} className={styles.source}>{p.name}</a>{p.since && <span className={styles.muted}> (new since <span className={styles.mono}>{shortDay(p.since)}</span>)</span>}</span>
                       ))}
+                      {g.peers.some((p) => p.since) && (
+                        <span className={styles.note}> {g.peers.filter((p) => p.since).length} of them started showing it after we first checked their records.</span>
+                      )}
                     </li>
                   ))}
                 </ul>
