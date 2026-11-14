@@ -37,7 +37,11 @@ export interface AccountPatch {
   notes?: string | null;
   dealValue?: number | null;
   nextStep?: string | null;
+  /** The person backing the deal at the account (FEATURE_CHAMPION). */
+  champion?: string | null;
 }
+
+export const MAX_CHAMPION_LENGTH = 120;
 
 /**
  * Validates an edit from the browser. Only stage, owner and notes can change;
@@ -79,6 +83,12 @@ export function parseAccountPatch(body: unknown): { ok: true; patch: AccountPatc
     const step = input.nextStep === null ? "" : clean(input.nextStep, false);
     if (step.length > MAX_NEXT_STEP_LENGTH) return { ok: false, error: `Next step can be at most ${MAX_NEXT_STEP_LENGTH} characters.` };
     patch.nextStep = step || null;
+  }
+  if ("champion" in input) {
+    if (input.champion !== null && typeof input.champion !== "string") return { ok: false, error: "Champion must be a name." };
+    const who = input.champion === null ? "" : clean(input.champion, false);
+    if (who.length > MAX_CHAMPION_LENGTH) return { ok: false, error: `Champion can be at most ${MAX_CHAMPION_LENGTH} characters.` };
+    patch.champion = who || null;
   }
 
   if (Object.keys(patch).length === 0) return { ok: false, error: "Nothing to update." };

@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ResearchBundle } from "../types/research.js";
-import { detectTriggers } from "./account-triggers.js";
+import { championLeft, detectTriggers } from "./account-triggers.js";
 import { intentSignals, parseIntentSignals } from "./buyer-intent.js";
 import { agencyPostings, usaJobsConfig } from "./usajobs.js";
 
@@ -22,19 +22,19 @@ const likeExact = (s: string) => s.replace(/[\\%_]/g, (c) => `\\${c}`);
 
 export async function recordAccountTriggers(
   supabase: SupabaseClient,
-  args: { userId: string; runId: string; subject: string; bundle: ResearchBundle; intent?: boolean; jobs?: boolean },
+  args: { userId: string; runId: string; subject: string; bundle: ResearchBundle; intent?: boolean; jobs?: boolean; champion?: boolean },
 ): Promise<number> {
   const { userId, runId, subject, bundle } = args;
-  // intent_signals only when buyer intent is on, so the flag off reads
-  // exactly what it did before the column existed.
-  const accountsQuery = args.intent
-    ? supabase.from("accounts").select("id, company, intent_signals")
-    : supabase.from("accounts").select("id, company");
-  const { data: accounts, error } = await accountsQuery
+  // intent_signals and champion only when their features are on, so a flag
+  // off reads exactly what it did before the column existed.
+  const columns = ["id", "company", ...(args.intent ? ["intent_signals"] : []), ...(args.champion ? ["champion"] : [])].join(", ");
+  const accountsQuery = supabase.from("accounts").select(columns);
+  const { data, error } = await accountsQuery
     .eq("user_id", userId)
     .ilike("company", likeExact(subject));
   if (error) throw new Error(`accounts lookup: ${error.message}`);
-  const matching = (accounts ?? []).filter((a) => lower(a.company as string) === lower(subject));
+  const accounts = data as unknown as { id: string; company: string; intent_signals?: unknown; champion?: string | null }[] | null;
+  const matching = (accounts ?? []).filter((a) => lower(a.company) === lower(subject));
   if (matching.length === 0) return 0;
 
   // The report before this one on the same subject.
@@ -75,9 +75,12 @@ export async function recordAccountTriggers(
   const { data: offer } = await supabase.from("seller_offers").select("competitors").eq("user_id", userId).maybeSingle();
   const competitors = ((offer?.competitors as string[] | undefined) ?? []);
   const triggers = detectTriggers(prev.bundle as ResearchBundle, bundle, competitors);
-  if (triggers.length === 0) return 0;
 
-  const rows = matching.flatMap((a) => triggers.map((t) => ({
+  const rows = matching.flatMap((a) => [
+    ...triggers,
+    // The account's own champion, when the user named one.
+    ...(args.champion ? [championLeft(prev.bundle as ResearchBundle, bundle, (a as { champion?: string | null }).champion)].filter((t): t is NonNullable<typeof t> => !!t) : []),
+  ].map((t) => ({
     account_id: a.id as string,
     user_id: userId,
     run_id: runId,
@@ -87,6 +90,7 @@ export async function recordAccountTriggers(
     url: t.url,
     event_date: t.eventDate ?? null,
   })));
+  if (rows.length === 0) return 0;
   // Idempotent: a trigger already recorded for the account is left as is.
   const { error: insErr } = await supabase.from("account_triggers").upsert(rows, { onConflict: "account_id,kind,title", ignoreDuplicates: true });
   if (insErr) throw new Error(`saving triggers: ${insErr.message}`);

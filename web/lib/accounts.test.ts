@@ -164,3 +164,10 @@ test("stall days and money formatting", () => {
   assert.equal(formatMoney(25000), "$25,000");
   assert.equal(formatMoney(null), "—");
 });
+
+test("champion on the account patch is trimmed, cleared when empty and length-capped", () => {
+  assert.deepEqual(parseAccountPatch({ champion: "  Dana Ruiz " }), { ok: true, patch: { champion: "Dana Ruiz" } });
+  assert.deepEqual(parseAccountPatch({ champion: "" }), { ok: true, patch: { champion: null } });
+  assert.equal(parseAccountPatch({ champion: "x".repeat(121) }).ok, false);
+  assert.equal(parseAccountPatch({ champion: 3 }).ok, false);
+});

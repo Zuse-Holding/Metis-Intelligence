@@ -9,6 +9,7 @@ import { useTier } from "../../lib/tier-context";
 import {
   ACCOUNT_STAGES,
   HEALTH_LABELS,
+  MAX_CHAMPION_LENGTH,
   MAX_NEXT_STEP_LENGTH,
   MAX_NOTES_LENGTH,
   MAX_OWNER_LENGTH,
@@ -21,6 +22,7 @@ import {
   type Health,
 } from "../../lib/accounts";
 import { INTENT_LABELS, INTENT_REASON_LABELS, type Intent } from "../../lib/intent";
+import { isEnabled } from "../../lib/flags";
 import styles from "./page.module.css";
 
 interface Account {
@@ -31,6 +33,7 @@ interface Account {
   notes: string | null;
   dealValue: number | null;
   nextStep: string | null;
+  champion?: string | null;
   stageChangedAt: string;
   createdAt: string;
   updatedAt: string;
@@ -100,7 +103,7 @@ export default function AccountsPage() {
   const [newCompany, setNewCompany] = useState("");
   const [adding, setAdding] = useState(false);
   const [panel, setPanel] = useState<Panel>(null);
-  const [draft, setDraft] = useState({ dealValue: "", nextStep: "", notes: "" });
+  const [draft, setDraft] = useState({ dealValue: "", nextStep: "", notes: "", champion: "" });
   const [savingId, setSavingId] = useState<string | null>(null);
   const [rerunningId, setRerunningId] = useState<string | null>(null);
   const [changes, setChanges] = useState<Record<string, Changes | "loading" | "error">>({});
@@ -257,7 +260,7 @@ export default function AccountsPage() {
 
   function toggleDeal(a: Account) {
     if (panel?.id === a.id && panel.kind === "deal") return setPanel(null);
-    setDraft({ dealValue: a.dealValue === null ? "" : String(a.dealValue), nextStep: a.nextStep ?? "", notes: a.notes ?? "" });
+    setDraft({ dealValue: a.dealValue === null ? "" : String(a.dealValue), nextStep: a.nextStep ?? "", notes: a.notes ?? "", champion: a.champion ?? "" });
     setPanel({ id: a.id, kind: "deal" });
   }
 
@@ -368,6 +371,19 @@ export default function AccountsPage() {
             placeholder="Send the proposal by Friday"
           />
         </label>
+        {isEnabled("champion") && (
+          <label className={styles.dealField}>
+            <span>Champion</span>
+            <input
+              className={styles.input}
+              value={draft.champion}
+              maxLength={MAX_CHAMPION_LENGTH}
+              onChange={(e) => setDraft((d) => ({ ...d, champion: e.target.value }))}
+              placeholder="Full name, as on their site"
+              title="We flag the deal at risk if this person drops off the company's leadership page. Someone who isn't listed there can't be tracked."
+            />
+          </label>
+        )}
         <label className={`${styles.dealField} ${styles.dealWide}`}>
           <span>Notes</span>
           <textarea
@@ -386,7 +402,7 @@ export default function AccountsPage() {
             className={styles.primaryBtn}
             disabled={savingId === a.id}
             onClick={async () => {
-              if (await patch(a.id, { dealValue: draft.dealValue, nextStep: draft.nextStep, notes: draft.notes })) setPanel(null);
+              if (await patch(a.id, { dealValue: draft.dealValue, nextStep: draft.nextStep, notes: draft.notes, ...(isEnabled("champion") ? { champion: draft.champion } : {}) })) setPanel(null);
             }}
           >
             {savingId === a.id ? <><Spinner size={10} /> Saving...</> : "Save deal"}

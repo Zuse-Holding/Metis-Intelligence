@@ -13,7 +13,7 @@ import type { ResearchBundle } from "../types/research.js";
 
 export type TriggerKind =
   | "leadership_change" | "layoffs" | "budget_cut" | "acquisition" | "lawsuit" | "competitor_adopted"
-  | "funding" | "expansion" | "federal_award" | "tech_added" | "tech_removed" | "hiring_tool";
+  | "funding" | "expansion" | "federal_award" | "tech_added" | "tech_removed" | "hiring_tool" | "champion_left";
 
 export interface TriggerCandidate {
   kind: TriggerKind;
@@ -47,6 +47,28 @@ export function matchesCompetitor(vendor: string, competitors: string[]): boolea
     const n = norm(c);
     return n.length > 0 && (v.includes(` ${n} `) || ` ${n} `.includes(v));
   });
+}
+
+/** "Martin Cabrera Jr." and "martin cabrera" are the same name; titles and suffixes don't count. */
+const personKey = (s: string) => norm(s).replace(/\b(jr|sr|ii|iii|iv|dr|mr|ms|mrs|phd|md)\b/g, "").replace(/\s+/g, " ").trim();
+
+/**
+ * The account's champion (named by the user) was on the previous report's
+ * leadership list and isn't on this one. Only when this report read the
+ * list itself; a champion who was never listed can't be tracked, and the
+ * Accounts page says so.
+ */
+export function championLeft(prev: Bundle, next: Bundle, champion: string | null | undefined): TriggerCandidate | undefined {
+  const who = personKey(champion ?? "");
+  if (who.split(" ").length < 2) return undefined; // a first name alone matches too much
+  const was = (prev.leadership ?? []).find((l) => personKey(l.name) === who);
+  if (!was) return undefined;
+  const read = (next.leadership ?? []).filter((l) => !l.carried && !l.lowConfidence);
+  if (read.length === 0) return undefined;
+  if ((next.leadership ?? []).some((l) => personKey(l.name) === who)) return undefined;
+  const url = read.find((l) => l.sourceUrl)?.sourceUrl ?? next.company?.website ?? "";
+  if (!url) return undefined;
+  return { kind: "champion_left", atRisk: true, title: clip(`Your champion ${was.name} (${was.title}) is no longer listed`), url };
 }
 
 export function detectTriggers(prev: Bundle, next: Bundle, competitors: string[] = []): TriggerCandidate[] {

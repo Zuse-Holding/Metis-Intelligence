@@ -45,6 +45,8 @@ export interface Account {
   notes: string | null;
   dealValue: number | null;
   nextStep: string | null;
+  /** Present while FEATURE_CHAMPION is on. */
+  champion?: string | null;
   stageChangedAt: string;
   createdAt: string;
   updatedAt: string;
@@ -107,6 +109,7 @@ interface AccountRow {
   created_at: string;
   updated_at: string;
   intent_signals?: unknown;
+  champion?: string | null;
 }
 
 interface RunRow {
@@ -164,10 +167,9 @@ export async function listAccounts(userId: string, now = new Date()): Promise<{ 
   const supabase = await createServerSupabaseClient();
   const since = new Date(now.getTime() - TRIGGER_LOOKBACK_DAYS * 86_400_000).toISOString();
   const intentOn = isEnabled("buyer_intent");
+  const championOn = isEnabled("champion");
   const [{ data, error }, runs, stallDays, { data: triggerRows, error: tErr }, { opportunities, offer }] = await Promise.all([
-    intentOn
-      ? supabase.from("accounts").select(`${ACCOUNT_COLUMNS}, intent_signals`).eq("user_id", userId)
-      : supabase.from("accounts").select(ACCOUNT_COLUMNS).eq("user_id", userId),
+    supabase.from("accounts").select([ACCOUNT_COLUMNS, ...(intentOn ? ["intent_signals"] : []), ...(championOn ? ["champion"] : [])].join(", ")).eq("user_id", userId),
     companyRuns(userId),
     getStallDays(userId),
     supabase
@@ -210,7 +212,7 @@ export async function listAccounts(userId: string, now = new Date()): Promise<{ 
     triggersByAccount.set(t.account_id as string, list);
   }
 
-  const accounts = ((data ?? []) as AccountRow[]).map((row): Account => {
+  const accounts = ((data ?? []) as unknown as AccountRow[]).map((row): Account => {
     const match = bySubject.get(subjectKey(row.company));
     const triggers = triggersByAccount.get(row.id) ?? [];
     const { health, reasons } = dealHealth({ stage: row.stage, stageChangedAt: row.stage_changed_at, triggers }, stallDays, now);
@@ -222,6 +224,7 @@ export async function listAccounts(userId: string, now = new Date()): Promise<{ 
       notes: row.notes,
       dealValue: row.deal_value === null ? null : Number(row.deal_value),
       nextStep: row.next_step,
+      ...(championOn ? { champion: row.champion ?? null } : {}),
       stageChangedAt: row.stage_changed_at,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
@@ -302,6 +305,7 @@ export async function updateAccount(userId: string, id: string, patch: AccountPa
   if (patch.notes !== undefined) row.notes = patch.notes;
   if (patch.dealValue !== undefined) row.deal_value = patch.dealValue;
   if (patch.nextStep !== undefined) row.next_step = patch.nextStep;
+  if (patch.champion !== undefined && isEnabled("champion")) row.champion = patch.champion;
   if (patch.stage !== undefined) {
     const { data: current } = await service.from("accounts").select("stage").eq("id", id).eq("user_id", userId).maybeSingle();
     if (!current) return false;
