@@ -3,6 +3,7 @@ import type { CompetitorEntry, FundingEntry, LeadershipEntry, NewsEntry, Product
 import type { CaseRecord } from "../agents/public-filings-agent/index.js";
 import { dealDate, isSocialSource, type CorporateAction } from "./corporate-actions.js";
 import { samePerson } from "./leadership.js";
+import { parseTechSeen, updateTechSeen, withFirstSeen, type TechSeen } from "./tech-seen.js";
 
 /**
  * Verified company profile, kept per domain (round 10). Each run re-derived
@@ -27,6 +28,8 @@ export interface CompanyProfileRecord {
   ownership_source?: string | null;
   /** How often each peer was found, across runs (ABM peer-set fix). */
   peer_votes?: PeerVotes | null;
+  /** When each tool was first seen on the domain (tech-seen.ts). */
+  tech_seen?: TechSeen | null;
   updated_at?: string;
 }
 
@@ -126,8 +129,10 @@ export function suspiciousFounded(bundle: ResearchBundle): boolean {
 }
 
 /** Fills the bundle's empty basics from the saved profile. Pure; returns what it filled. */
-export function applyProfile(bundle: ResearchBundle, p: CompanyProfileRecord | undefined): string[] {
+export function applyProfile(bundle: ResearchBundle, p: CompanyProfileRecord | undefined, now = new Date()): string[] {
   if (!p) return [];
+  // First-seen dates on every tool, from the saved record (today for a tool seen for the first time).
+  if (bundle.techStack) bundle.techStack.items = withFirstSeen(bundle.techStack.items, parseTechSeen(p.tech_seen), now);
   const c = bundle.company;
   const filled: string[] = [];
   const filed = !!c.foundedSource && /sec\.gov/i.test(c.foundedSource);
@@ -154,7 +159,7 @@ export function applyProfile(bundle: ResearchBundle, p: CompanyProfileRecord | u
 }
 
 /** The record to save from a finished bundle: only values with a source. Pure. */
-export function profileFrom(bundle: ResearchBundle, domain: string, prior?: CompanyProfileRecord): CompanyProfileRecord | undefined {
+export function profileFrom(bundle: ResearchBundle, domain: string, prior?: CompanyProfileRecord, opts: { techSeen?: boolean } = {}): CompanyProfileRecord | undefined {
   const c = bundle.company;
   const ownershipSource = bundle.ownership ? bundle.sources.find((s) => s.usedFor.includes("funding") && s.title === "Ownership")?.url
     ?? bundle.sources.find((s) => s.usedFor.includes("funding"))?.url : undefined;
@@ -173,7 +178,9 @@ export function profileFrom(bundle: ResearchBundle, domain: string, prior?: Comp
     peer_votes: updatePeerVotes(prior?.peer_votes, bundle.competitors),
     updated_at: new Date().toISOString(),
   };
-  return rec.founded || rec.headquarters || rec.ownership || rec.legal_name || Object.keys(rec.peer_votes ?? {}).length ? rec : undefined;
+  // Only with FEATURE_TECH_SEEN: the column has to exist before anything writes it.
+  if (opts.techSeen) rec.tech_seen = bundle.techStack ? updateTechSeen(parseTechSeen(prior?.tech_seen), bundle.techStack.items) : prior?.tech_seen ?? null;
+  return rec.founded || rec.headquarters || rec.ownership || rec.legal_name || Object.keys(rec.peer_votes ?? {}).length || rec.tech_seen ? rec : undefined;
 }
 
 export async function saveProfile(rec: CompanyProfileRecord | undefined): Promise<void> {

@@ -35,6 +35,8 @@ export interface TechItem {
   evidence: string;
   sourceName: string;
   sourceUrl: string;
+  /** YYYY-MM-DD Metis first saw it on this domain (src/lib/tech-seen.ts; with FEATURE_FACT_CACHE). */
+  firstSeen?: string;
 }
 
 export interface TechStack {

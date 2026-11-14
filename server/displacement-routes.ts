@@ -4,6 +4,22 @@ import { SerperSearchProvider } from "../src/lib/providers.js";
 import { TechStackAgent } from "../src/agents/tech-stack-agent/index.js";
 import { knownVendor, peerDomain, peerGaps, weakSpotQueries, weakSpots, type PeerStack, type WeakSpot } from "../src/lib/displacement.js";
 import type { ResearchBundle } from "../src/types/research.js";
+import { isEnabled } from "../src/lib/flags.js";
+import { adoptedSince, parseTechSeen, updateTechSeen, type TechSeen } from "../src/lib/tech-seen.js";
+
+/** A peer's first-seen record with this read added, saved back. Fails open. */
+async function recordTechSeen(supabase: SupabaseClient, domain: string, items: { vendor: string; confidence: string }[]): Promise<TechSeen | undefined> {
+  try {
+    const { data } = await supabase.from("company_profiles").select("tech_seen").eq("domain", domain).maybeSingle();
+    const seen = updateTechSeen(parseTechSeen(data?.tech_seen), items);
+    const { error } = await supabase.from("company_profiles").upsert({ domain, tech_seen: seen }, { onConflict: "domain" });
+    if (error) console.error("[displacement] saving tech_seen:", error.message);
+    return seen;
+  } catch (err) {
+    console.error("[displacement] tech_seen failed:", err instanceof Error ? err.message : err);
+    return undefined;
+  }
+}
 
 /**
  * Competitive displacement and peer urgency for the Sales tab (ABM brief §3).
@@ -119,7 +135,9 @@ export function registerDisplacementRoutes(app: express.Express, d: Deps) {
         let s = stackCache.get(domain);
         if (!s || !fresh(s.at)) {
           const { stack } = await new TechStackAgent().run(domain);
-          s = { at: Date.now(), items: (stack?.items ?? []).map((i) => ({ vendor: i.vendor, category: i.category, sourceUrl: i.sourceUrl, evidence: i.evidence })) };
+          const items = stack?.items ?? [];
+          const seen = isEnabled("tech_seen") && stack ? await recordTechSeen(d.supabase, domain, items) : undefined;
+          s = { at: Date.now(), items: items.map((i) => ({ vendor: i.vendor, category: i.category, sourceUrl: i.sourceUrl, evidence: i.evidence, ...(adoptedSince(seen, i.vendor) ? { since: adoptedSince(seen, i.vendor) } : {}) })) };
           stackCache.set(domain, s);
         }
         return { name: p.name, domain, items: s.items };

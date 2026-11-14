@@ -154,14 +154,15 @@ export function peerDomain(name: string, results: SearchResult[]): string | unde
 export interface PeerStack {
   name: string;
   domain: string;
-  items: { vendor: string; category: string; sourceUrl: string; evidence: string }[];
+  /** `since`: the day it first showed up, when the peer was checked earlier without it (tech-seen.ts). */
+  items: { vendor: string; category: string; sourceUrl: string; evidence: string; since?: string }[];
 }
 
 export interface PeerGap {
   vendor: string;
   category: string;
-  /** Peers using it, with the record or tag that shows it. */
-  peers: { name: string; evidence: string; url: string }[];
+  /** Peers using it, with the record or tag that shows it, and since when if it's new. */
+  peers: { name: string; evidence: string; url: string; since?: string }[];
   /** How many peers were compared. */
   of: number;
 }
@@ -182,7 +183,7 @@ export function peerGaps(targetVendors: string[], peers: PeerStack[]): PeerGap[]
     for (const i of p.items) {
       if (has.has(i.vendor.toLowerCase()) || GAP_SKIP_CATEGORIES.has(i.category)) continue;
       const gap = byVendor.get(i.vendor) ?? { vendor: i.vendor, category: i.category, peers: [], of: usable.length };
-      if (!gap.peers.some((x) => x.name === p.name)) gap.peers.push({ name: p.name, evidence: i.evidence, url: i.sourceUrl });
+      if (!gap.peers.some((x) => x.name === p.name)) gap.peers.push({ name: p.name, evidence: i.evidence, url: i.sourceUrl, ...(i.since ? { since: i.since } : {}) });
       byVendor.set(i.vendor, gap);
     }
   }

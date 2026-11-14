@@ -100,3 +100,5 @@
 
 .vendorLikely { border-style: dashed; }
 .likelyMark { color: var(--muted); font-size: 11px; }
+.muted { color: var(--muted); }
+.mono { font-family: var(--font-mono, "JetBrains Mono", monospace); }

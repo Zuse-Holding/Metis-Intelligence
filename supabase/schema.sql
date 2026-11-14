@@ -1034,3 +1034,11 @@ ALTER TABLE account_triggers ADD CONSTRAINT account_triggers_kind_check CHECK (k
 -- ============================================================
 ALTER TABLE account_triggers ADD COLUMN IF NOT EXISTS alerted_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS account_triggers_unalerted ON account_triggers (user_id) WHERE alerted_at IS NULL;
+
+-- ============================================================
+-- When each tool was first seen on a domain (src/lib/tech-seen.ts):
+-- {checkedFirst, vendors: {key: {vendor, firstSeen, lastSeen, confirmed}}}.
+-- Written by the report save and the peer comparison. Apply before
+-- deploying: both write this column.
+-- ============================================================
+ALTER TABLE company_profiles ADD COLUMN IF NOT EXISTS tech_seen JSONB;
