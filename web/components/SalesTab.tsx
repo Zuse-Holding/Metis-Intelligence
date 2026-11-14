@@ -4,7 +4,7 @@ import EmptyState from "./EmptyState";
 import SellerOfferForm from "./SellerOfferForm";
 import { Spinner } from "./Skeleton";
 import { contacts, isCompetitor, outreachBrief, snapshot, whyNow, type SalesBundle, type SellerOffer } from "../lib/sales";
-import { outreach, outreachLines, type Evidence, type WeakSpot } from "../lib/outreach";
+import { outreach, outreachLines, type Evidence, type Outreach, type WeakSpot } from "../lib/outreach";
 import { isEnabled } from "../lib/flags";
 import styles from "./SalesTab.module.css";
 
@@ -85,7 +85,13 @@ export default function SalesTab({ subject, bundle, runId }: Props) {
     for (const [vendor, s] of Object.entries(spots)) if (s.state === "done") m[vendor] = s.data;
     return m;
   }, [spots]);
-  const say = useMemo(() => (sayOn ? outreach(b, offer, loadedSpots) : ({} as ReturnType<typeof outreach>)), [sayOn, b, offer, loadedSpots]);
+  const fullOn = isEnabled("outreach_full");
+  const say = useMemo((): Outreach => {
+    if (!sayOn) return { objections: [] };
+    const o = outreach(b, offer, loadedSpots);
+    // Without the full version: the opening line and the top objection only, as before.
+    return fullOn ? o : { opener: o.opener, objection: o.objection, objections: o.objection ? [o.objection] : [] };
+  }, [sayOn, fullOn, b, offer, loadedSpots]);
 
   const byCategory = useMemo(() => {
     const m = new Map<string, NonNullable<SalesBundle["techStack"]>["items"]>();
@@ -281,24 +287,49 @@ export default function SalesTab({ subject, bundle, runId }: Props) {
       {sayOn && (
         <section className={styles.section}>
           <h3 className={styles.sectionTitle}>What to say</h3>
-          {!say.opener && !say.objection ? (
+          {!say.opener && !say.objections?.length && !say.callNotes ? (
             <EmptyState size="compact" title="Nothing in this report to build an opening line on" when="Lines appear only when a dated, sourced finding backs them" />
           ) : (
             <div className={styles.say}>
-              {say.opener && (
+              {say.email ? (
+                <div className={styles.sayItem}>
+                  <span className={styles.sayLabel}>Opening email</span>
+                  <p className={styles.sayText}>
+                    {say.email.map((s, i) => (
+                      <span key={i}>{i > 0 && " "}{s.text}{s.evidence.length > 0 && <> <Sources items={s.evidence} /></>}</span>
+                    ))}
+                  </p>
+                </div>
+              ) : say.opener && (
                 <div className={styles.sayItem}>
                   <span className={styles.sayLabel}>Opening line</span>
                   <p className={styles.sayText}>{say.opener.text} <Sources items={say.opener.evidence} /></p>
                 </div>
               )}
-              {say.objection && (
+              {say.callNotes && say.callNotes.points.length > 0 && (
                 <div className={styles.sayItem}>
-                  <span className={styles.sayLabel}>Likely objection</span>
-                  <p className={styles.sayText}>&ldquo;{say.objection.objection}&rdquo; <Sources items={say.objection.evidence} /></p>
-                  <span className={styles.sayLabel}>Suggested response</span>
-                  <p className={styles.sayText}>{say.objection.response} {say.objection.responseEvidence.length > 0 && <Sources items={say.objection.responseEvidence} />}</p>
+                  <span className={styles.sayLabel}>Talking points</span>
+                  <ul className={styles.sayList}>
+                    {say.callNotes.points.map((p, i) => <li key={i} className={styles.sayText}>{p.text} <Sources items={p.evidence} /></li>)}
+                  </ul>
                 </div>
               )}
+              {say.callNotes && say.callNotes.questions.length > 0 && (
+                <div className={styles.sayItem}>
+                  <span className={styles.sayLabel}>Questions to ask</span>
+                  <ul className={styles.sayList}>
+                    {say.callNotes.questions.map((q, i) => <li key={i} className={styles.sayText}>{q.text} <Sources items={q.evidence} /></li>)}
+                  </ul>
+                </div>
+              )}
+              {say.objections?.map((o, i) => (
+                <div key={o.objection} className={styles.sayItem}>
+                  <span className={styles.sayLabel}>{i === 0 ? "Most likely objection" : "Likely objection"}</span>
+                  <p className={styles.sayText}>&ldquo;{o.objection}&rdquo; <Sources items={o.evidence} /></p>
+                  <span className={styles.sayLabel}>Suggested response</span>
+                  <p className={styles.sayText}>{o.response} {o.responseEvidence.length > 0 && <Sources items={o.responseEvidence} />}</p>
+                </div>
+              ))}
               {competitorsUsed.some((c) => !spots[c.vendor]) && (
                 <span className={styles.note}>Check the news on {competitorsUsed.filter((c) => !spots[c.vendor]).map((c) => c.vendor).join(", ")} above to use it here.</span>
               )}

@@ -1,7 +1,7 @@
 // Browser-side copy of src/lib/flags.ts. Same rule: off unless set to
 // on/true/1. NEXT_PUBLIC_ values are baked in at build time, so changing
 // one needs a redeploy.
-export type Flag = "provenance" | "entity_resolution" | "self_exclusion" | "buyer_intent" | "outreach";
+export type Flag = "provenance" | "entity_resolution" | "self_exclusion" | "buyer_intent" | "outreach" | "outreach_full";
 
 const VALUES: Record<Flag, string | undefined> = {
   // Literal property access: Next only inlines NEXT_PUBLIC_ vars written out in full.
@@ -10,6 +10,8 @@ const VALUES: Record<Flag, string | undefined> = {
   self_exclusion: process.env.NEXT_PUBLIC_FEATURE_SELF_EXCLUSION,
   buyer_intent: process.env.NEXT_PUBLIC_FEATURE_BUYER_INTENT,
   outreach: process.env.NEXT_PUBLIC_FEATURE_OUTREACH,
+  // Opening email, call notes and every likely objection (needs outreach on too).
+  outreach_full: process.env.NEXT_PUBLIC_FEATURE_OUTREACH_FULL,
 };
 
 export function isEnabled(flag: Flag): boolean {
