@@ -1026,3 +1026,11 @@ ALTER TABLE account_triggers DROP CONSTRAINT IF EXISTS account_triggers_kind_che
 ALTER TABLE account_triggers ADD CONSTRAINT account_triggers_kind_check CHECK (kind IN (
   'leadership_change', 'layoffs', 'budget_cut', 'acquisition', 'lawsuit', 'competitor_adopted',
   'funding', 'expansion', 'federal_award', 'tech_added', 'tech_removed', 'hiring_tool'));
+
+-- ============================================================
+-- Trigger alerts (FEATURE_TRIGGER_ALERTS): when a trigger was emailed,
+-- or marked too old to send. NULL = not yet alerted. Written only by the
+-- agent server (service role); src/lib/trigger-alerts.ts.
+-- ============================================================
+ALTER TABLE account_triggers ADD COLUMN IF NOT EXISTS alerted_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS account_triggers_unalerted ON account_triggers (user_id) WHERE alerted_at IS NULL;

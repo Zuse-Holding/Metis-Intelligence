@@ -297,6 +297,9 @@ export default function AccountsPage() {
             </li>
           ))}
         </ul>
+        {a.latestRun && (
+          <a className={styles.source} href={`/app?run=${a.latestRun.id}&tab=sales`}>What to say now</a>
+        )}
       </div>
     );
   }

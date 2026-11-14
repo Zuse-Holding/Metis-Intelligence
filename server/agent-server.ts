@@ -43,6 +43,7 @@ import { welcomeEmail, capReachedEmail } from "../src/lib/email/copy.js";
 import { createClient } from "@supabase/supabase-js";
 import { BUILD_ID } from "../src/lib/build.js";
 import { claimDueAccount, recordAccountTriggers } from "../src/lib/account-pipeline.js";
+import { sendTriggerAlerts } from "../src/lib/trigger-alerts.js";
 import { PULL_INTERVAL_HOURS, pullSamOpportunities } from "../src/lib/sam-gov.js";
 import { isEnabled } from "../src/lib/flags.js";
 import type { ResearchBundle } from "../src/types/research.js";
@@ -1992,7 +1993,43 @@ app.listen(PORT, () => {
   logProviderConfig();
   if (isEnabled("account_refresh")) startAccountRefresh();
   if (isEnabled("buyer_intent")) startSamPull();
+  if (isEnabled("trigger_alerts")) startTriggerAlerts();
 });
+
+/**
+ * Trigger alerts: every 15 minutes, email each user the why-now triggers
+ * recorded on their saved accounts since the last alert (one email per
+ * user per tick, at most). Off unless FEATURE_TRIGGER_ALERTS=on.
+ */
+function startTriggerAlerts() {
+  if (!process.env.RESEND_API_KEY) {
+    console.warn("[alerts] FEATURE_TRIGGER_ALERTS is on but RESEND_API_KEY isn't set; no trigger alerts");
+    return;
+  }
+  let busy = false;
+  const tick = async () => {
+    if (busy) return;
+    busy = true;
+    try {
+      const n = await sendTriggerAlerts({
+        supabase,
+        send: async ({ to, subject, text, headers }) => (await sendEmail({ to, subject, text, headers, redactRecipient: true })).sent,
+        unsubscribe: (userId) => {
+          const token = signUnsubscribeToken(userId);
+          return { url: unsubscribePageUrl(token), headers: unsubscribeHeaders(token) };
+        },
+      });
+      if (n) console.log(`[alerts] sent ${n} trigger alert email(s)`);
+    } catch (err) {
+      console.error("[alerts] tick failed:", err instanceof Error ? err.message : err);
+    } finally {
+      busy = false;
+    }
+  };
+  void tick();
+  setInterval(() => { void tick(); }, 15 * 60_000);
+  console.log("[alerts] trigger alert emails on");
+}
 
 /**
  * Daily SAM.gov pull for buyer intent's "Shopping now" list. Checks hourly;

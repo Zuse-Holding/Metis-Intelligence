@@ -15,11 +15,12 @@
  *   FEATURE_ACCOUNT_REFRESH=on    weekly re-runs of saved accounts, off the plan limits (ABM brief §4; needs the pipeline SQL)
  *   FEATURE_BUYER_INTENT=on       buying signals on saved accounts and the daily SAM.gov pull (needs the buyer intent SQL; the pull needs SAM_GOV_API_KEY)
  *   FEATURE_JOB_POSTINGS=on       tools named in the company's own public job postings (Greenhouse, Lever, Ashby), as "likely" tech stack items
+ *   FEATURE_TRIGGER_ALERTS=on     emails each user the why-now triggers on their saved accounts (needs account_triggers.alerted_at and RESEND_API_KEY)
  *
  * Server-side only. The web app reads its own NEXT_PUBLIC_FEATURE_* copy
  * where the UI needs to know (see web/lib/flags.ts).
  */
-export type Flag = "provenance" | "coverage" | "entity_resolution" | "domain_posture" | "self_exclusion" | "related_entities" | "gap_fill" | "fact_cache" | "tech_stack" | "account_refresh" | "buyer_intent" | "job_postings";
+export type Flag = "provenance" | "coverage" | "entity_resolution" | "domain_posture" | "self_exclusion" | "related_entities" | "gap_fill" | "fact_cache" | "tech_stack" | "account_refresh" | "buyer_intent" | "job_postings" | "trigger_alerts";
 
 export function isEnabled(flag: Flag, env: Record<string, string | undefined> = process.env): boolean {
   const value = env[`FEATURE_${flag.toUpperCase()}`]?.trim().toLowerCase();
