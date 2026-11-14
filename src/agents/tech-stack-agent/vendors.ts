@@ -23,7 +23,7 @@ export type TechCategory =
   | "Identity and security" | "IT service management" | "Hosting" | "CDN and security" | "DNS" | "CMS"
   | "E-commerce" | "Analytics" | "Tag management" | "Advertising" | "Consent management" | "Scheduling"
   | "Forms" | "Monitoring" | "Recruiting" | "Reviews and messaging" | "Video" | "Business identity"
-  | "Business intelligence" | "Developer tools" | "Construction management" | "HR and payroll";
+  | "Business intelligence" | "Developer tools" | "Construction management" | "HR and payroll" | "Other vendors";
 
 /** Display order for the report section. */
 export const CATEGORY_ORDER: TechCategory[] = [
@@ -32,7 +32,7 @@ export const CATEGORY_ORDER: TechCategory[] = [
   "Construction management", "HR and payroll",
   "Payments", "E-commerce", "Identity and security", "IT service management", "Business intelligence", "Recruiting",
   "Scheduling", "Forms", "CMS", "Hosting", "CDN and security", "DNS", "Developer tools", "Analytics", "Tag management",
-  "Advertising", "Consent management", "Monitoring", "Video", "Business identity",
+  "Advertising", "Consent management", "Monitoring", "Video", "Business identity", "Other vendors",
 ];
 
 export type IpProvider = "aws" | "cloudfront" | "gcp" | "cloudflare";
