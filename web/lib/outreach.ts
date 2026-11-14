@@ -1,7 +1,7 @@
 /**
- * What to say (ABM brief §1, minimum version): an opening line and the most
- * likely objection, with a suggested response, built only from findings the
- * report already has. Fixed templates, no generated text, so nothing can be
+ * What to say (ABM brief §1): an opening email, call notes (three talking
+ * points, two questions) and the likely objections with suggested
+ * responses, built only from findings the report already has. Fixed templates, no generated text, so nothing can be
  * said about the account that a finding doesn't back.
  *
  * Rule: no evidence, no line. Every line carries the findings it rests on,
@@ -30,7 +30,21 @@ export interface Objection {
   responseEvidence: Evidence[];
 }
 
-export interface Outreach { opener?: Line; objection?: Objection }
+/** One sentence of the email. Facts about the account always carry evidence;
+ *  the seller's own offer and the ask are about the seller, so carry none. */
+export interface EmailSentence { text: string; evidence: Evidence[]; kind: "fact" | "offer" | "ask" }
+
+export interface CallNotes { points: Line[]; questions: Line[] }
+
+export interface Outreach {
+  opener?: Line;
+  /** The most likely objection (the first of `objections`). */
+  objection?: Objection;
+  /** 3 to 5 sentences, or absent when the report can't back that many. */
+  email?: EmailSentence[];
+  callNotes?: CallNotes;
+  objections: Objection[];
+}
 
 /** A vendor's recent bad news, as /api/displacement/weak-spots returns it. */
 export interface WeakSpot { kind: string; title: string; url: string; date: string; outlet?: string }
@@ -156,26 +170,131 @@ export function objections(b: SalesBundle, offer: SellerOffer | null, weakSpots:
     });
   }
 
-  return out.filter((o) => o.evidence.length > 0);
+  const ending = events.find((e) => e.kind === "Contract ending");
+  if (ending) {
+    out.push({
+      objection: "We're locked into our current contract.",
+      evidence: fromEvent(ending),
+      response: `Understood. Your ${ending.text} (${ending.date}), so now is a good time to compare before it's renewed.`,
+      responseEvidence: fromEvent(ending),
+    });
+  }
+
+  return out.filter((o) => o.evidence.length > 0).slice(0, MAX_OBJECTIONS);
 }
 
-/** The opening line and the top objection; either is absent without evidence. */
+export const MAX_OBJECTIONS = 5;
+
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** A cited finding, worded for the email, a talking point and a question. */
+interface Fact { key: string; email: string; point: string; question?: string; evidence: Evidence[] }
+
+/** Every cited finding that can be said to the account, strongest first. */
+function facts(b: SalesBundle, offer: SellerOffer | null, weakSpots: Record<string, WeakSpot[]>, now: Date): Fact[] {
+  const out: Fact[] = [];
+  const push = (f: Fact) => { if (f.evidence.length > 0 && !out.some((o) => o.key === f.key)) out.push(f); };
+
+  for (const t of competitorTools(b, offer)) {
+    const w = latestSpot(t.vendor, weakSpots);
+    const stack = ev(`Tech stack, ${t.sourceName}`, t.sourceUrl);
+    const what = t.category.toLowerCase();
+    push({
+      key: `tool:${t.vendor}`,
+      email: w ? `I noticed you run ${t.vendor}, and ${spotText(t.vendor, w)}.` : `I noticed you run ${t.vendor} for ${what}.`,
+      point: w ? `They run ${t.vendor} (${what}), a vendor you replace; ${spotText(t.vendor, w)}.` : `They run ${t.vendor} (${what}), a vendor you replace.`,
+      question: `How is ${t.vendor} working for your ${what} today?`,
+      evidence: w ? [...stack, ...spotEvidence(t.vendor, w)] : stack,
+    });
+  }
+  for (const e of whyNow(b, now)) {
+    const evidence = fromEvent(e);
+    const key = `${e.kind}|${e.url}|${e.text}`;
+    if (e.kind === "Contract ending") push({ key, email: `I also noticed your ${e.text} (${e.date}).`, point: `Their ${e.text} (${e.date}).`, question: "How are you approaching that contract's renewal?", evidence });
+    else if (e.kind === "Funding") push({ key, email: `I also saw the ${e.text} (${e.date}).`, point: `Raised ${e.text} (${e.date}).`, question: "What are the priorities for the new funding?", evidence });
+    else if (e.kind === "Acquisition") push({ key, email: `I also saw the ${e.text} acquisition (${e.date}).`, point: `Acquisition: ${e.text} (${e.date}).`, question: `How is the ${e.text} integration going?`, evidence });
+    else if (e.kind === "News" && EXPANSION_RE.test(e.text)) push({ key, email: `I also saw ${headline(e)}.`, point: `Expanding: ${headline(e)}.`, question: "What does that expansion mean for your team?", evidence });
+    else if (e.kind === "News") push({ key, email: `I also saw ${headline(e)}.`, point: `In the news: ${headline(e)}.`, evidence });
+    else if (e.kind === "Federal award") push({ key, email: `I also saw the ${e.text} (${e.date}).`, point: `Federal award: ${e.text} (${e.date}).`, evidence });
+  }
+  // Open roles that name a vendor the seller replaces or one of their keywords.
+  for (const board of b.techStack?.jobBoards ?? []) {
+    for (const p of board.postings) {
+      if (!/^https?:\/\//.test(p.url) || !p.title.trim()) continue;
+      const tool = offer?.competitors.length ? (p.tools ?? []).find((t) => isCompetitor(t, offer.competitors)) : undefined;
+      const keyword = offer?.keywords.find((k) => k.trim() && new RegExp(`\\b${escapeRe(k.trim())}\\b`, "i").test(p.title));
+      if (!tool && !keyword) continue;
+      push({
+        key: `job:${p.url}`,
+        email: `I saw you're hiring a ${p.title}.`,
+        point: `Hiring: ${p.title}${tool ? `, a role that names ${tool}` : ""}.`,
+        question: `What will the new ${p.title} take on first?`,
+        evidence: ev(`Job posting, ${board.ats}`, p.url),
+      });
+    }
+  }
+  return out;
+}
+
+const shareSource = (a: Evidence[], b: Evidence[]) => a.some((x) => b.some((y) => y.url === x.url));
+
+/**
+ * The opening email: the opening line, a second finding, what the seller
+ * does (their own words from "What you sell") and the ask. Left out unless
+ * there's at least one sentence beyond the opener and the ask, so it's
+ * always 3 to 4 sentences.
+ */
+export function openingEmail(b: SalesBundle, offer: SellerOffer | null, weakSpots: Record<string, WeakSpot[]> = {}, now = new Date()): EmailSentence[] | undefined {
+  const opener = openingLine(b, offer, weakSpots, now);
+  if (!opener || opener.evidence.length === 0) return undefined;
+  const out: EmailSentence[] = [{ text: opener.text, evidence: opener.evidence, kind: "fact" }];
+  const second = facts(b, offer, weakSpots, now).find((f) => !shareSource(f.evidence, opener.evidence));
+  if (second) out.push({ text: second.email, evidence: second.evidence, kind: "fact" });
+  const offering = offer?.offering.trim().replace(/[.\s]+$/, "");
+  if (offering) out.push({ text: `What we do: ${offering}.`, evidence: [], kind: "offer" });
+  if (out.length < 2) return undefined;
+  const renewal = out.some((s) => s.kind === "fact" && /contract|you run/i.test(s.text));
+  out.push({ text: renewal ? "Would 20 minutes to compare before your next renewal be useful?" : "Would a 20-minute call next week be useful?", evidence: [], kind: "ask" });
+  return out;
+}
+
+/** Up to three talking points and two questions, each on a cited finding. */
+export function callNotes(b: SalesBundle, offer: SellerOffer | null, weakSpots: Record<string, WeakSpot[]> = {}, now = new Date()): CallNotes | undefined {
+  const all = facts(b, offer, weakSpots, now);
+  const points = all.slice(0, 3).map((f) => ({ text: f.point, evidence: f.evidence }));
+  const questions = all.filter((f) => f.question).slice(0, 2).map((f) => ({ text: f.question!, evidence: f.evidence }));
+  return points.length || questions.length ? { points, questions } : undefined;
+}
+
+/** Everything to say; each part is absent without evidence. */
 export function outreach(b: SalesBundle, offer: SellerOffer | null, weakSpots: Record<string, WeakSpot[]> = {}, now = new Date()): Outreach {
   const opener = openingLine(b, offer, weakSpots, now);
+  const all = objections(b, offer, weakSpots, now);
   return {
     opener: opener && opener.evidence.length > 0 ? opener : undefined,
-    objection: objections(b, offer, weakSpots, now)[0],
+    objection: all[0],
+    email: openingEmail(b, offer, weakSpots, now),
+    callNotes: callNotes(b, offer, weakSpots, now),
+    objections: all,
   };
 }
 
 /** Plain-text lines for "Copy for outreach", each ending with its links. */
 export function outreachLines(o: Outreach): string[] {
   const links = (e: Evidence[]) => `(${e.map((x) => x.url).join(", ")})`;
+  const cite = (text: string, e: Evidence[]) => (e.length ? `${text} ${links(e)}` : text);
   const lines: string[] = [];
-  if (o.opener) lines.push("", "Opening line:", `- ${o.opener.text} ${links(o.opener.evidence)}`);
-  if (o.objection) {
-    const all = [...o.objection.evidence, ...o.objection.responseEvidence.filter((r) => !o.objection!.evidence.some((e) => e.url === r.url))];
-    lines.push("", "Likely objection:", `- "${o.objection.objection}" Suggested response: ${o.objection.response} ${links(all)}`);
+  if (o.email) lines.push("", "Opening email:", ...o.email.map((s) => `- ${cite(s.text, s.evidence)}`));
+  else if (o.opener) lines.push("", "Opening line:", `- ${o.opener.text} ${links(o.opener.evidence)}`);
+  if (o.callNotes?.points.length) lines.push("", "Talking points:", ...o.callNotes.points.map((p) => `- ${p.text} ${links(p.evidence)}`));
+  if (o.callNotes?.questions.length) lines.push("", "Questions to ask:", ...o.callNotes.questions.map((q) => `- ${q.text} ${links(q.evidence)}`));
+  const objs = o.objections?.length ? o.objections : o.objection ? [o.objection] : [];
+  if (objs.length) {
+    lines.push("", objs.length === 1 ? "Likely objection:" : "Likely objections:");
+    for (const x of objs) {
+      const all = [...x.evidence, ...x.responseEvidence.filter((r) => !x.evidence.some((e) => e.url === r.url))];
+      lines.push(`- "${x.objection}" Suggested response: ${x.response} ${links(all)}`);
+    }
   }
   return lines;
 }

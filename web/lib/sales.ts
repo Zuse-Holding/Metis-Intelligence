@@ -35,6 +35,8 @@ export interface SalesBundle {
     domain: string;
     items: { vendor: string; category: string; confidence: string; evidence: string; sourceName: string; sourceUrl: string }[];
     websiteUnavailable?: string;
+    /** Open roles on the company's own job board (FEATURE_JOB_POSTINGS). */
+    jobBoards?: { ats: string; url: string; postings: { title: string; url: string; postedAt?: string; tools?: string[] }[] }[];
   };
 }
 
