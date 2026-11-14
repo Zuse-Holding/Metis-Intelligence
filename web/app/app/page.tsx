@@ -125,8 +125,10 @@ function Dashboard() {
         // /app?run=<id> (from Accounts or an exported link) opens that report.
         const wanted = searchParams.get("run");
         const linked = wanted ? data.find((r) => r.id === wanted) : undefined;
+        // &tab=sales (from a trigger alert email) opens the Sales tab, where the refreshed opener is.
+        const salesTab = searchParams.get("tab") === "sales";
         if (wanted) router.replace("/app");
-        if (linked) selectRun(linked);
+        if (linked) void selectRun(linked).then(() => { if (salesTab && linked.type === "company") setActiveTab("sales"); });
         else if (data.length > 0) selectRun(data[0]);
       })
       .catch(() => {})
