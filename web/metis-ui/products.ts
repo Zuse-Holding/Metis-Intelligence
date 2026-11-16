@@ -14,7 +14,7 @@ export interface Product {
 
 export const HUB_URL = "https://metisanalytic.com";
 export const SUPPORT_EMAIL = "support@metisanalytic.com";
-export const LEGAL_ENTITY = "Zuse Holdings LLC";
+export const LEGAL_ENTITY = "Juice Equity LLC";
 
 export const PRODUCTS: Product[] = [
   {

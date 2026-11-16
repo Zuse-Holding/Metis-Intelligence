@@ -70,6 +70,20 @@ const WHATS_NEXT = [
   { title: "Creator search", desc: "Find and vet creators with the same sourced reports." },
 ];
 
+// The sales layer (components/SalesTab.tsx, /accounts). Copy from the Nov 14
+// "Dev changes before investor pitches" note. Never write "full tech stack",
+// "real-time", "intent data", "contract renewal dates" or "tracks your
+// champion": none of those is true of what ships.
+const SALES_FEATURES: { title: string; desc: string; plans?: string }[] = [
+  { title: "Tech stack", desc: "The tools their public records show, marked confirmed or likely." },
+  { title: "Why they might switch", desc: "Dated news about the vendor they use now." },
+  { title: "What their peers use", desc: "Tools their competitors use that they don't." },
+  { title: "What to say", desc: "An opening email, talking points, questions and likely objections with responses." },
+  { title: "Why now and who to contact", desc: "Recent events and the leaders to reach." },
+  { title: "Pipeline and weekly alerts", desc: "On your saved accounts.", plans: "Pro and Team" },
+  { title: "Buying signals from public sources", desc: "Hiring, stated plans, tool changes and open government solicitations, each with its source.", plans: "Pro and Team" },
+];
+
 const FEATURES = [
   {
     num: "01",
@@ -185,6 +199,33 @@ export default function Landing() {
         </div>
 
         <div className={styles.heroNote}>NO SALES CALL · JUST ANSWERS</div>
+      </section>
+
+      {/* SALES LAYER */}
+      <section id="sales" className={`${styles.featuresSection} ${styles.fadeIn}`}>
+        <div className={styles.sectionLabel}>For sales and BD teams</div>
+        <h2 className={styles.salesTitle}>Who to call, why now, and what to say.</h2>
+        <p className={styles.salesSub}>
+          Name a company and Metis shows the tools their public records show, why they might switch
+          vendors, what&apos;s happening there this month, and a first email already written. Every
+          line links its source.
+        </p>
+        <div className={`${styles.featuresGrid} ${styles.salesGrid}`}>
+          {SALES_FEATURES.map((f) => (
+            <div key={f.title} className={styles.featureCard}>
+              <div className={styles.featureTitle}>
+                {f.title}
+                {f.plans && <span className={styles.salesPlans}>{f.plans}</span>}
+              </div>
+              <div className={styles.featureDesc}>{f.desc}</div>
+            </div>
+          ))}
+        </div>
+        <div className={styles.salesCta}>
+          <button className={styles.btnHeroPrimary} onClick={() => router.push("/login?mode=signup")}>
+            Start a free trial
+          </button>
+        </div>
       </section>
 
       {/* SAMPLE REPORT */}

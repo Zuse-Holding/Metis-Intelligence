@@ -10,6 +10,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ResearchOrchestrator } from "../src/agents/orchestrator/index.js";
 import type { ProgressEvent } from "../src/lib/coverage/recorder.js";
+import { onSignupTrial, SIGNUP_TRIAL_DAYS } from "../src/lib/signup-trial.js";
 import { currentWindow, timeUntil, WINDOW_HOURS, WINDOW_LOOKBACK_MS, type UsageWindow } from "../src/lib/usage-window.js";
 import { DeepDiveAgent } from "../src/agents/deep-dive/index.js";
 import { EntityExtractionAgent } from "../src/agents/entity-extraction/index.js";
@@ -113,7 +114,10 @@ function hasPoliticalAccess(userId: string, config: TierConfig): boolean {
   return POLITICAL_ACCESS_USER_IDS.has(userId);
 }
 
-type Tier = "internal" | "team" | "pro" | "basic" | "free" | "trial";
+// "signup_trial" is server-only: the 7-day self-serve trial (src/lib/signup-trial.ts).
+// It has the "trial" features with its own caps, and the web is told "trial"
+// (see publicTier).
+type Tier = "internal" | "team" | "pro" | "basic" | "free" | "trial" | "signup_trial";
 
 interface TierConfig {
   // Per work window (src/lib/usage-window.ts): the first run opens an
@@ -188,6 +192,10 @@ const PRO_MONTHLY_DEEP_DIVE_LIMIT = Number(process.env.PRO_MONTHLY_DEEP_DIVE_LIM
 // Task 3.1 — hourly burst throttle, env-configurable.
 const RATE_LIMIT_FREE_PER_HOUR = Number(process.env.RATE_LIMIT_FREE_PER_HOUR ?? 3);
 const RATE_LIMIT_PAID_PER_HOUR = Number(process.env.RATE_LIMIT_PAID_PER_HOUR ?? 30);
+// 7-day signup trial: totals for the whole trial, not per month. Anyone can
+// sign up, so these bound what one throwaway account can cost.
+const SIGNUP_TRIAL_RESEARCH_LIMIT  = Number(process.env.SIGNUP_TRIAL_RESEARCH_LIMIT  ?? 50);
+const SIGNUP_TRIAL_DEEP_DIVE_LIMIT = Number(process.env.SIGNUP_TRIAL_DEEP_DIVE_LIMIT ?? 10);
 
 const TIER_CONFIG: Record<Tier, TierConfig> = {
   internal: { windowResearchLimit: -1, windowDeepDiveLimit: -1, deepDiveAccess: true, politicalAccess: true, watchlistLimit: -1, knowledgeGraphAccess: true, exportAccess: true, charonProtocol: true, chatWidgetAccess: true, personResearchAccess: true, personSearchAccess: true, muckrockAccess: true, adminAccess: true, monthlyResearchLimit: -1, lifetimeResearchLimit: -1, monthlyDeepDiveLimit: -1, hourlyResearchLimit: -1, publicRecordsAccess: true, creatorAccess: true, accountsAccess: true },
@@ -215,7 +223,27 @@ const TIER_CONFIG: Record<Tier, TierConfig> = {
   // gets requested for these accounts. Expiry enforced via
   // profiles.trial_expires_at, checked in getUserTier below.
   trial:    { windowResearchLimit: 200, windowDeepDiveLimit: 20, deepDiveAccess: true, politicalAccess: false, watchlistLimit: 50, knowledgeGraphAccess: true, exportAccess: true, charonProtocol: false, chatWidgetAccess: true, personResearchAccess: false, personSearchAccess: true, muckrockAccess: false, adminAccess: false, monthlyResearchLimit: -1, lifetimeResearchLimit: -1, monthlyDeepDiveLimit: -1, hourlyResearchLimit: -1, publicRecordsAccess: true, creatorAccess: false, accountsAccess: true },
+  // Self-serve 7-day signup trial: the trial's features, but the paid hourly
+  // throttle and whole-trial totals in the monthly fields (counted from the
+  // trial's start, see capPeriodStart) instead of the hand-assigned trial's
+  // 200-per-window, no-hourly-cap allowance.
+  signup_trial: { windowResearchLimit: -1, windowDeepDiveLimit: -1, deepDiveAccess: true, politicalAccess: false, watchlistLimit: 50, knowledgeGraphAccess: true, exportAccess: true, charonProtocol: false, chatWidgetAccess: true, personResearchAccess: false, personSearchAccess: true, muckrockAccess: false, adminAccess: false, monthlyResearchLimit: SIGNUP_TRIAL_RESEARCH_LIMIT, lifetimeResearchLimit: -1, monthlyDeepDiveLimit: SIGNUP_TRIAL_DEEP_DIVE_LIMIT, hourlyResearchLimit: RATE_LIMIT_PAID_PER_HOUR, publicRecordsAccess: true, creatorAccess: false, accountsAccess: true },
 };
+
+/**
+ * An account's tier for the admin stats, from its profiles row. No tier means
+ * Free (see getUserTier), and a Free account inside its signup trial shows
+ * as "signup trial" so trial sign-ups aren't counted as Free.
+ */
+function adminTierLabel(tier: string | null, signupTrialExpiresAt: string | null): string {
+  if (onSignupTrial(tier, signupTrialExpiresAt)) return "signup trial";
+  return tier ?? "free";
+}
+
+/** The tier name the web sees. The signup trial is shown as "trial". */
+function publicTier<T extends string>(tier: T): T | "trial" {
+  return tier === "signup_trial" ? "trial" : tier;
+}
 
 /**
  * Looks up the user's tier. If the user is on "trial" and trial_expires_at
@@ -229,8 +257,27 @@ const TIER_CONFIG: Record<Tier, TierConfig> = {
  * actual default tier for every new account — it was "basic" pre-launch,
  * meaning every signup silently got full Basic-tier access for free
  * forever (see AUDIT.md). Free is the real floor now; Basic/Pro only ever
- * apply once the Stripe webhook has written them.
+ * apply once the Stripe webhook has written them. A Free account inside its
+ * 7-day signup trial gets "signup_trial" (see signupTrialActive).
  */
+/**
+ * The 7-day signup trial (src/lib/signup-trial.ts). Read on its own so that a
+ * database without the signup_trial_expires_at column yet (migration not run)
+ * only costs new accounts their trial, never anyone else their real tier.
+ */
+async function signupTrialActive(userId: string, tier: string | null | undefined): Promise<boolean> {
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("signup_trial_expires_at")
+    .eq("id", userId)
+    .single();
+  if (error) {
+    console.error("[tier] signup trial lookup failed:", JSON.stringify(error));
+    return false;
+  }
+  return onSignupTrial(tier, data?.signup_trial_expires_at);
+}
+
 async function getUserTier(userId: string): Promise<Tier | "expired"> {
   const { data, error } = await supabase
     .from("profiles")
@@ -238,9 +285,12 @@ async function getUserTier(userId: string): Promise<Tier | "expired"> {
     .eq("id", userId)
     .single();
 
-  if (error || !data?.tier) return "free";
+  if (error) return "free";
+  if (!data?.tier || data.tier === "free") {
+    return (await signupTrialActive(userId, data?.tier)) ? "signup_trial" : "free";
+  }
 
-  const tier = (data.tier as Tier) ?? "free";
+  const tier = data.tier as Tier;
 
   if (tier === "trial" && data.trial_expires_at) {
     const expired = new Date() > new Date(data.trial_expires_at);
@@ -430,6 +480,20 @@ async function hasVerifiedEmail(userId: string): Promise<boolean> {
  * subscription (Free, Team/trial/internal, or a lapsed subscription),
  * which is unchanged from before Stripe existed.
  */
+/**
+ * Where the "monthly" caps start counting. For the signup trial they are
+ * whole-trial totals, so they count from the trial's start; everyone else
+ * uses the billing period.
+ */
+async function capPeriodStart(userId: string, tier: Tier | "expired"): Promise<Date> {
+  if (tier !== "signup_trial") return getBillingPeriodStart(userId);
+  const { data } = await supabase.from("profiles").select("signup_trial_expires_at").eq("id", userId).single();
+  const ends = data?.signup_trial_expires_at ? new Date(data.signup_trial_expires_at) : null;
+  // Can't read it: count from 7 days ago, which covers any live trial.
+  const end = ends && !isNaN(ends.getTime()) ? ends : new Date();
+  return new Date(end.getTime() - SIGNUP_TRIAL_DAYS * 86_400_000);
+}
+
 async function getBillingPeriodStart(userId: string): Promise<Date> {
   const { data: profile } = await supabase
     .from("profiles")
@@ -892,8 +956,17 @@ app.post("/research", async (req, res) => {
       // resetting on the account's billing period (see
       // getBillingPeriodStart). Stacks with the person-only cap above.
       if (config.monthlyResearchLimit !== -1) {
-        const periodStart = await getBillingPeriodStart(userId);
+        const periodStart = await capPeriodStart(userId, tier);
         const monthlyUsage = await getMonthlyResearchUsage(userId, periodStart);
+        if (monthlyUsage >= config.monthlyResearchLimit && tier === "signup_trial") {
+          tierDenied(
+            res,
+            `You've used the ${config.monthlyResearchLimit} quick profiles in your free trial.`,
+            "Pick a plan to keep going: metisanalytic.com/pricing.",
+            { userId, cap: "signup_trial_research_limit", capEmail: "free trial quick-profile limit" }
+          );
+          return false;
+        }
         if (monthlyUsage >= config.monthlyResearchLimit) {
           tierDenied(
             res,
@@ -1081,7 +1154,7 @@ app.post("/research", async (req, res) => {
       );
     }
 
-    res.json({ ok: true, runId, reportPath: outPath, tier, charon: config.charonProtocol });
+    res.json({ ok: true, runId, reportPath: outPath, tier: publicTier(tier), charon: config.charonProtocol });
 
     // Account pipeline: what changed since the last report on a saved
     // account. After the response, so it never delays or fails the run.
@@ -1442,8 +1515,17 @@ app.post("/deep-dive", async (req, res) => {
       // for Pro, so this is the binding check for that tier; other tiers that
       // still use monthlyDeepDiveLimit: -1 skip this entirely.
       if (config.monthlyDeepDiveLimit !== -1) {
-        const periodStart = await getBillingPeriodStart(userId);
+        const periodStart = await capPeriodStart(userId, tier);
         const usage = await getMonthlyDeepDiveUsage(userId, periodStart);
+        if (usage >= config.monthlyDeepDiveLimit && tier === "signup_trial") {
+          tierDenied(
+            res,
+            `You've used the ${config.monthlyDeepDiveLimit} Deep Dives in your free trial.`,
+            "Pick a plan to keep going: metisanalytic.com/pricing.",
+            { userId, cap: "signup_trial_deep_dive_limit", capEmail: "free trial Deep Dive limit" }
+          );
+          return false;
+        }
         if (usage >= config.monthlyDeepDiveLimit) {
           tierDenied(
             res,
@@ -1556,7 +1638,9 @@ app.get("/tier/:userId", async (req, res) => {
   // Pro's Deep Dive cap (monthlyDeepDiveLimit) is exposed the same way.
   let monthlyUsage: { used: number; limit: number; resetsAt: string } | null = null;
   let monthlyDeepDiveUsage: { used: number; limit: number; resetsAt: string } | null = null;
-  if (config.monthlyResearchLimit !== -1 || config.monthlyDeepDiveLimit !== -1) {
+  // Not for the signup trial: its caps are whole-trial totals, and the web
+  // shows these as "this month".
+  if (tier !== "signup_trial" && (config.monthlyResearchLimit !== -1 || config.monthlyDeepDiveLimit !== -1)) {
     const periodStart = await getBillingPeriodStart(req.params.userId);
     const resetsAt = new Date(periodStart.getFullYear(), periodStart.getMonth() + 1, periodStart.getDate()).toISOString();
     if (config.monthlyResearchLimit !== -1) {
@@ -1588,7 +1672,7 @@ app.get("/tier/:userId", async (req, res) => {
   }
 
   res.json({
-    tier,
+    tier: publicTier(tier),
     config: effectiveConfig,
     displayName: profile?.display_name ?? null,
     monthlyUsage,
@@ -1768,7 +1852,7 @@ app.get("/admin/stats/:userId", async (req, res) => {
 
   try {
     const [profilesResult, runsTodayResult, deepDivesTodayResult] = await Promise.all([
-      supabase.from("profiles").select("tier"),
+      supabase.from("profiles").select("tier, signup_trial_expires_at"),
       supabase
         .from("research_runs")
         .select("id", { count: "exact", head: true })
@@ -1781,7 +1865,7 @@ app.get("/admin/stats/:userId", async (req, res) => {
 
     const tierBreakdownMap = new Map<string, number>();
     for (const row of profilesResult.data ?? []) {
-      const t = (row.tier as string) ?? "basic";
+      const t = adminTierLabel(row.tier as string | null, row.signup_trial_expires_at as string | null);
       tierBreakdownMap.set(t, (tierBreakdownMap.get(t) ?? 0) + 1);
     }
     const tierBreakdown = [...tierBreakdownMap.entries()].map(([tier, count]) => ({ tier, count }));
@@ -1842,7 +1926,7 @@ app.get("/admin/unit-economics/:userId", async (req, res) => {
         .select("id, spent_on, amount_usd, channel, note")
         .order("spent_on", { ascending: false })
         .limit(10),
-      supabase.from("profiles").select("id, display_name, tier, stripe_customer_id"),
+      supabase.from("profiles").select("id, display_name, tier, signup_trial_expires_at, stripe_customer_id"),
     ]);
     const failed = [runsResult, diveResult, spendResult, recentSpendResult, profilesResult].find((r) => r.error);
     if (failed) throw failed.error;
@@ -1862,7 +1946,7 @@ app.get("/admin/unit-economics/:userId", async (req, res) => {
     const accounts = (profilesResult.data ?? []).map((p) => ({
       userId: p.id as string,
       name: (p.display_name as string | null) ?? null,
-      tier: (p.tier as string | null) ?? null,
+      tier: adminTierLabel(p.tier as string | null, p.signup_trial_expires_at as string | null),
       stripeCustomerId: (p.stripe_customer_id as string | null) ?? null,
       reports: usage.get(p.id)?.reports ?? 0,
       llmCostUsd: usage.get(p.id)?.llmCostUsd ?? 0,
