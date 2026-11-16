@@ -1053,3 +1053,31 @@ ALTER TABLE account_triggers DROP CONSTRAINT IF EXISTS account_triggers_kind_che
 ALTER TABLE account_triggers ADD CONSTRAINT account_triggers_kind_check CHECK (kind IN (
   'leadership_change', 'layoffs', 'budget_cut', 'acquisition', 'lawsuit', 'competitor_adopted',
   'funding', 'expansion', 'federal_award', 'tech_added', 'tech_removed', 'hiring_tool', 'champion_left'));
+
+-- ============================================================
+-- 7-day signup trial (Nov 16). Every new account gets the "trial" tier's
+-- features for 7 days, then drops back to Free. Read in getUserTier()
+-- (server/agent-server.ts) via src/lib/signup-trial.ts.
+--
+-- A separate column, not profiles.tier = 'trial': the Stripe webhook never
+-- overwrites a 'trial' tier (that's for hand-assigned demo/partner
+-- accounts), so someone who paid mid-trial would never be upgraded, and an
+-- expired hand-assigned trial locks the account out instead of falling
+-- back to Free. Existing accounts are not backfilled: new signups only.
+-- Safe to re-run.
+-- ============================================================
+
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS signup_trial_expires_at TIMESTAMPTZ;
+
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER SET search_path = ''
+AS $$
+BEGIN
+  INSERT INTO public.profiles (id, signup_trial_expires_at)
+  VALUES (NEW.id, now() + interval '7 days')
+  ON CONFLICT (id) DO NOTHING;
+  RETURN NEW;
+END;
+$$;

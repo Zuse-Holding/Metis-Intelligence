@@ -10,6 +10,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ResearchOrchestrator } from "../src/agents/orchestrator/index.js";
 import type { ProgressEvent } from "../src/lib/coverage/recorder.js";
+import { onSignupTrial } from "../src/lib/signup-trial.js";
 import { currentWindow, timeUntil, WINDOW_HOURS, WINDOW_LOOKBACK_MS, type UsageWindow } from "../src/lib/usage-window.js";
 import { DeepDiveAgent } from "../src/agents/deep-dive/index.js";
 import { EntityExtractionAgent } from "../src/agents/entity-extraction/index.js";
@@ -229,8 +230,27 @@ const TIER_CONFIG: Record<Tier, TierConfig> = {
  * actual default tier for every new account — it was "basic" pre-launch,
  * meaning every signup silently got full Basic-tier access for free
  * forever (see AUDIT.md). Free is the real floor now; Basic/Pro only ever
- * apply once the Stripe webhook has written them.
+ * apply once the Stripe webhook has written them. A Free account inside its
+ * 7-day signup trial gets "trial" (see signupTrialActive).
  */
+/**
+ * The 7-day signup trial (src/lib/signup-trial.ts). Read on its own so that a
+ * database without the signup_trial_expires_at column yet (migration not run)
+ * only costs new accounts their trial, never anyone else their real tier.
+ */
+async function signupTrialActive(userId: string, tier: string | null | undefined): Promise<boolean> {
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("signup_trial_expires_at")
+    .eq("id", userId)
+    .single();
+  if (error) {
+    console.error("[tier] signup trial lookup failed:", JSON.stringify(error));
+    return false;
+  }
+  return onSignupTrial(tier, data?.signup_trial_expires_at);
+}
+
 async function getUserTier(userId: string): Promise<Tier | "expired"> {
   const { data, error } = await supabase
     .from("profiles")
@@ -238,9 +258,12 @@ async function getUserTier(userId: string): Promise<Tier | "expired"> {
     .eq("id", userId)
     .single();
 
-  if (error || !data?.tier) return "free";
+  if (error) return "free";
+  if (!data?.tier || data.tier === "free") {
+    return (await signupTrialActive(userId, data?.tier)) ? "trial" : "free";
+  }
 
-  const tier = (data.tier as Tier) ?? "free";
+  const tier = data.tier as Tier;
 
   if (tier === "trial" && data.trial_expires_at) {
     const expired = new Date() > new Date(data.trial_expires_at);
