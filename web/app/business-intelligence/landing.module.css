@@ -199,6 +199,22 @@
 .featureTitle { font-size: 15px; font-weight: 600; margin-bottom: 8px; color: #e8e8f0; }
 .featureDesc { font-size: 13px; color: var(--muted); line-height: 1.6; }
 
+/* SALES LAYER */
+.salesTitle {
+  font-family: var(--font-display); font-size: 28px; font-weight: 700;
+  letter-spacing: -0.02em; text-align: center; margin: -24px 0 12px;
+}
+.salesSub {
+  font-size: 15px; color: var(--muted); line-height: 1.7;
+  max-width: 600px; margin: 0 auto 32px; text-align: center;
+}
+.salesPlans {
+  margin-left: 8px; font-family: var(--font-mono); font-size: 10px; font-weight: 500;
+  letter-spacing: 0.08em; text-transform: uppercase; color: #ff6b2b; white-space: nowrap;
+}
+.salesGrid > :last-child:nth-child(odd) { grid-column: 1 / -1; }
+.salesCta { display: flex; justify-content: center; margin-top: 28px; }
+
 /* PRICING */
 .pricingSection {
   max-width: 1000px; margin: 0 auto; padding: 40px 48px 80px;
