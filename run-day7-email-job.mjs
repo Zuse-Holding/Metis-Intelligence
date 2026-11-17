@@ -66,7 +66,7 @@ export async function runDay7EmailJob() {
 
   const { data: profiles, error: profilesErr } = await supabase
     .from("profiles")
-    .select("id, display_name, day7_email_sent_at, email_opt_out_at");
+    .select("id, display_name, tier, signup_trial_expires_at, day7_email_sent_at, email_opt_out_at");
   if (profilesErr) {
     console.error("[day7-email-job] profiles fetch failed:", profilesErr);
     return false;
@@ -84,7 +84,10 @@ export async function runDay7EmailJob() {
     const firstName = profileById.get(user.id)?.display_name?.split(" ")[0] ?? "";
     // Throws without AGENT_SECRET: better no email than one with no way to unsubscribe.
     const token = signUnsubscribeToken(user.id);
-    const { subject, text, replyTo } = day7Email(firstName, unsubscribePageUrl(token));
+    const profile = profileById.get(user.id);
+    // Had the signup trial and is still on Free: the trial has just ended.
+    const trialEnded = Boolean(profile?.signup_trial_expires_at) && (!profile?.tier || profile.tier === "free");
+    const { subject, text, replyTo } = day7Email(firstName, unsubscribePageUrl(token), trialEnded);
     const result = await sendEmail({ to: user.email, subject, text, replyTo, headers: unsubscribeHeaders(token) });
     if (result.sent) {
       const { error } = await supabase

@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useTier } from "../lib/tier-context";
-import { upgradeTarget, usageRows } from "../lib/usage";
+import { trialEnds, upgradeTarget, usageRows } from "../lib/usage";
 import styles from "./UsageLimitBanner.module.css";
 
 const DISMISS_KEY = "metis.usageBanner.dismissed";
@@ -29,9 +29,11 @@ export function UsageLimitBanner() {
   const key = `${row.key}:${row.status}:${row.resets}`;
   if (dismissed === key) return null;
 
-  const upgrade = upgradeTarget(tier);
+  const upgrade = upgradeTarget(tier, trialEnds({ monthlyUsage, monthlyDeepDiveUsage }));
   const thing = row.label.toLowerCase();
-  const resets = row.resets ? ` They reset ${row.periodTag === "month" ? "" : "at "}${row.resets}.` : "";
+  const resets = row.resets
+    ? ` They reset ${row.periodTag === "month" ? "" : "at "}${row.resets}.`
+    : row.ends ? ` Your trial ends ${row.ends}.` : "";
   const message = row.status === "danger"
     ? `You've used all ${row.limit} ${thing} ${row.periodPhrase}.${resets}`
     : `You've used ${row.used} of ${row.limit} ${thing} ${row.periodPhrase}.${resets}`;

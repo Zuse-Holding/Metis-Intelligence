@@ -120,7 +120,7 @@ const PRICING = [
     tier: "PRO",
     price: "$49",
     period: "/mo",
-    features: ["Everything in Basic", "300 quick profiles a month", "50 Deep Dives a month", "Unlimited Watchlist", "PDF export", "Knowledge Graph"],
+    features: ["Everything in Basic", "300 quick profiles a month", "50 Deep Dives a month", "Unlimited Watchlist", "PDF export", "Knowledge Graph", "Account pipeline, weekly alerts and buying signals"],
     cta: "Start Pro →",
     highlight: true,
   },
@@ -189,7 +189,7 @@ export default function Landing() {
 
         <div className={styles.heroCtas}>
           <button className={styles.btnHeroPrimary} onClick={() => router.push("/login?mode=signup")}>
-            Get started →
+            Start a free trial →
           </button>
           <button className={styles.btnHeroSecondary} onClick={() => {
             document.getElementById("features")?.scrollIntoView({ behavior: "smooth" });
@@ -198,7 +198,7 @@ export default function Landing() {
           </button>
         </div>
 
-        <div className={styles.heroNote}>NO SALES CALL · JUST ANSWERS</div>
+        <div className={styles.heroNote}>7-DAY FREE TRIAL · NO CARD · NO SALES CALL</div>
       </section>
 
       {/* SALES LAYER */}
@@ -345,7 +345,7 @@ export default function Landing() {
         <h2 className={styles.finalCtaTitle}>Run your first report.</h2>
         <p className={styles.finalCtaSub}>No sales call. Just answers.</p>
         <button className={styles.btnHeroPrimary} onClick={() => router.push("/login?mode=signup")}>
-          Create account →
+          Start a free trial →
         </button>
       </section>
     </MarketingShell>

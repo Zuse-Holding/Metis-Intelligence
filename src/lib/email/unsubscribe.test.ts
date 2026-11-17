@@ -35,3 +35,14 @@ test("the day-7 and cap-reached emails carry the unsubscribe link", () => {
   assert.ok(day7Email("Nick", url).text.includes(`Unsubscribe: ${url}`));
   assert.ok(capReachedEmail("Nick", "monthly research limit", url).text.includes(`Unsubscribe: ${url}`));
 });
+
+test("day-7 email mentions the trial ending only for accounts that had one and stayed on Free", () => {
+  const url = "https://metisanalytic.com/unsubscribe?t=x";
+  assert.ok(!day7Email("Nick", url).text.includes("trial"));
+  assert.ok(day7Email("Nick", url, true).text.includes("Your 7-day trial has also wrapped up"));
+});
+
+test("cap-reached email makes no claim Pro doesn't keep", () => {
+  const text = capReachedEmail("Nick", "free trial quick-profile limit", "https://x").text;
+  assert.ok(!/unlimited|code at checkout|priority/i.test(text));
+});
