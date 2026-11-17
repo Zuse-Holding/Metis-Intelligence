@@ -88,7 +88,7 @@ const FEATURES = [
   {
     num: "01",
     title: "Multi-Agent Research",
-    desc: "Seven specialized agents — website, news, competitors, corporate filings, leadership, and products — run simultaneously and synthesize into one clean report.",
+    desc: "Up to 18 specialized agents check the company's own site, news, competitors, filings, courts, sanctions and more, then synthesize one clean report. Every section shows its sources.",
   },
   {
     num: "02",
@@ -177,14 +177,13 @@ export default function Landing() {
         </div>
 
         <h1 className={styles.heroTitle}>
-          Research any company, person or product.<br />
-          <span className={styles.heroAccent}>Every section shows its sources.</span>
+          Who to call, why now, and what to say.<br />
+          <span className={styles.heroAccent}>Every line links its source.</span>
         </h1>
 
         <p className={styles.heroSub}>
-          Seven AI agents run in parallel to surface funding, leadership, competitors,
-          and market signals — synthesized into one clean report.
-          Priced like a tool, reads like an analyst&apos;s brief.
+          Name a company. Metis shows the tools its public records show, why it might switch
+          vendors, and a first email already written.
         </p>
 
         <div className={styles.heroCtas}>
@@ -204,11 +203,10 @@ export default function Landing() {
       {/* SALES LAYER */}
       <section id="sales" className={`${styles.featuresSection} ${styles.fadeIn}`}>
         <div className={styles.sectionLabel}>For sales and BD teams</div>
-        <h2 className={styles.salesTitle}>Who to call, why now, and what to say.</h2>
+        <h2 className={styles.salesTitle}>What you get on every account.</h2>
         <p className={styles.salesSub}>
-          Name a company and Metis shows the tools their public records show, why they might switch
-          vendors, what&apos;s happening there this month, and a first email already written. Every
-          line links its source.
+          Seven things for the company you name, from public records and dated news. Research on
+          any company, person or product works the same way: every line links its source.
         </p>
         <div className={`${styles.featuresGrid} ${styles.salesGrid}`}>
           {SALES_FEATURES.map((f) => (
@@ -261,11 +259,12 @@ export default function Landing() {
       {/* STATS */}
       <div className={`${styles.statsBar} ${styles.fadeIn}`}>
         {[
-          { num: "7", label: "Parallel agents per run" },
+          { pre: "Up to", num: "18", label: "Agents per company report" },
           { num: "10", label: "Sections in Deep Dive" },
           { num: "3", label: "Research types: company, person, product" },
         ].map((s) => (
           <div key={s.label} className={styles.statItem}>
+            {s.pre && <span className={styles.statLabel}>{s.pre}</span>}
             <span className={styles.statNum}>{s.num}</span>
             <span className={styles.statLabel}>{s.label}</span>
           </div>

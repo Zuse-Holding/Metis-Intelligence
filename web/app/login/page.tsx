@@ -5,6 +5,7 @@ import { createClient } from "../../lib/supabase/client";
 import { useTier } from "../../lib/tier-context";
 import { SiteNav } from "../../components/marketing/MarketingShell";
 import { safeNext } from "../../lib/return-to";
+import { trackTrialStarted } from "../../lib/track";
 import styles from "./page.module.css";
 
 // Show/hide toggle for password fields — plain SVG eye / eye-off icons,
@@ -131,6 +132,7 @@ function LoginPage() {
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error ?? "Signup failed.");
+        trackTrialStarted(); // the account exists, so the 7-day trial has started
 
         // Supabase tells us definitively which state we're in — a session
         // coming back means confirmation wasn't required (or this address

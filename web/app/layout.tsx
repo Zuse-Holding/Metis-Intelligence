@@ -6,6 +6,8 @@ import { TierProvider } from "../lib/tier-context";
 import { PastDueBanner } from "../components/PastDueBanner";
 import { UsageLimitBanner } from "../components/UsageLimitBanner";
 import { SessionGuard } from "../components/SessionGuard";
+import { SrcCapture } from "../components/SrcCapture";
+import { Analytics } from "@vercel/analytics/next";
 
 export const metadata: Metadata = {
   // Absolute URLs for the generated social preview image (app/opengraph-image.tsx).
@@ -43,11 +45,13 @@ export default function RootLayout({
         <ResearchProvider>
           <TierProvider>
             <SessionGuard />
+            <SrcCapture />
             <PastDueBanner />
             <UsageLimitBanner />
             {children}
           </TierProvider>
         </ResearchProvider>
+        <Analytics />
       </body>
     </html>
   );

@@ -222,7 +222,7 @@ const TIER_CONFIG: Record<Tier, TierConfig> = {
   // which stay off regardless of what tier
   // gets requested for these accounts. Expiry enforced via
   // profiles.trial_expires_at, checked in getUserTier below.
-  trial:    { windowResearchLimit: 200, windowDeepDiveLimit: 20, deepDiveAccess: true, politicalAccess: false, watchlistLimit: 50, knowledgeGraphAccess: true, exportAccess: true, charonProtocol: false, chatWidgetAccess: true, personResearchAccess: false, personSearchAccess: true, muckrockAccess: false, adminAccess: false, monthlyResearchLimit: -1, lifetimeResearchLimit: -1, monthlyDeepDiveLimit: -1, hourlyResearchLimit: -1, publicRecordsAccess: true, creatorAccess: false, accountsAccess: true },
+  trial:    { windowResearchLimit: 200, windowDeepDiveLimit: 20, deepDiveAccess: true, politicalAccess: false, watchlistLimit: 50, knowledgeGraphAccess: true, exportAccess: true, charonProtocol: false, chatWidgetAccess: true, personResearchAccess: false, personSearchAccess: true, muckrockAccess: false, adminAccess: false, monthlyResearchLimit: -1, lifetimeResearchLimit: -1, monthlyDeepDiveLimit: -1, hourlyResearchLimit: RATE_LIMIT_PAID_PER_HOUR, publicRecordsAccess: true, creatorAccess: false, accountsAccess: true },
   // Self-serve 7-day signup trial: the trial's features, but the paid hourly
   // throttle and whole-trial totals in the monthly fields (counted from the
   // trial's start, see capPeriodStart) instead of the hand-assigned trial's
