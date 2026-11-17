@@ -8,7 +8,7 @@ import styles from "./hub.module.css";
 // Intelligence's own landing page moved to /business-intelligence; the app
 // itself (/app, /dashboard, ...) didn't move.
 
-const LINE = "One investigates a company from seven angles at once. One argues with a seller's numbers before you sign. One puts five AI analysts on a stock and grades every call they make.";
+const LINE = "One investigates a company across up to 18 sources. One argues with a seller's numbers before you sign. One puts five AI analysts on a stock and grades every call they make.";
 
 export const metadata: Metadata = {
   title: "Metis",
@@ -38,8 +38,8 @@ export default function Hub() {
           </div>
           <h2 className={styles.cardTitle}>Research a company, a person or a product</h2>
           <p className={styles.cardBody}>
-            Seven agents work on it at the same time, covering the website, news, competitors, corporate filings,
-            leadership and products. You get one report back.
+            For a company, up to 18 agents check the website, news, competitors, filings, courts and sanctions.
+            You get one report back.
           </p>
           <p className={styles.who}>For founders, operators and BD teams.</p>
           <div className={styles.actions}>

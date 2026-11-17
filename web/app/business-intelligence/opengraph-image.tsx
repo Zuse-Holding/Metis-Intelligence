@@ -8,6 +8,6 @@ export default function OpengraphImage() {
   return ogCard({
     product: "INTELLIGENCE",
     title: "Research any company, person or product.",
-    body: "Seven agents cover the website, news, filings, leadership and competitors. Every section shows its sources.",
+    body: "Up to 18 agents cover the website, news, filings, courts and competitors. Every section shows its sources.",
   });
 }

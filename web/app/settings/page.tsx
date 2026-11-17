@@ -201,7 +201,7 @@ export default function Settings() {
       { label: "LLM Provider",    value: "Groq · llama-3.3-70b-versatile", status: "active" },
       { label: "KG Extraction",   value: "OpenRouter · gpt-oss-120b",       status: "active" },
       { label: "Search Provider", value: "Serper.dev",                       status: "active" },
-      { label: "Agent Pipeline",  value: "7 parallel agents",                status: "" },
+      { label: "Agent Pipeline",  value: "Up to 18 agents per report",       status: "" },
       { label: "Full Page Fetch", value: "Enabled",                          status: "active" },
     ]},
     { section: "DATA", items: [

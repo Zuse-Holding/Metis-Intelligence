@@ -88,7 +88,7 @@ const FEATURES = [
   {
     num: "01",
     title: "Multi-Agent Research",
-    desc: "Seven specialized agents — website, news, competitors, corporate filings, leadership, and products — run simultaneously and synthesize into one clean report.",
+    desc: "Up to 18 specialized agents check the company's own site, news, competitors, filings, courts, sanctions and more, then synthesize one clean report. Every section shows its sources.",
   },
   {
     num: "02",
@@ -259,11 +259,12 @@ export default function Landing() {
       {/* STATS */}
       <div className={`${styles.statsBar} ${styles.fadeIn}`}>
         {[
-          { num: "7", label: "Parallel agents per run" },
+          { pre: "Up to", num: "18", label: "Agents per company report" },
           { num: "10", label: "Sections in Deep Dive" },
           { num: "3", label: "Research types: company, person, product" },
         ].map((s) => (
           <div key={s.label} className={styles.statItem}>
+            {s.pre && <span className={styles.statLabel}>{s.pre}</span>}
             <span className={styles.statNum}>{s.num}</span>
             <span className={styles.statLabel}>{s.label}</span>
           </div>
