@@ -53,6 +53,9 @@ export interface MonthlyUsage {
   used: number;
   limit: number;
   resetsAt: string;
+  /** "trial": a total for the 7-day signup trial, not a monthly cap;
+   *  resetsAt is then when the trial ends. */
+  period?: "trial";
 }
 
 /** Work-window usage: quick profiles and Deep Dives share one window,

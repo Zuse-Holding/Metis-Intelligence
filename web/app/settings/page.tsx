@@ -286,7 +286,7 @@ export default function Settings() {
                     </div>
                     <span className={styles.usageCount}>
                       {quotaText({ used: row.used, limit: row.limit, unit: row.label.toLowerCase(), resets: row.resets })}
-                      {!row.resets && row.periodTag !== "month" ? " · window starts with your next run" : ""}
+                      {row.ends ? ` · trial ends ${row.ends}` : !row.resets && row.periodTag !== "month" ? " · window starts with your next run" : ""}
                     </span>
                   </div>
                   <span className={`${styles.badge} ${styles[row.status]}`}>

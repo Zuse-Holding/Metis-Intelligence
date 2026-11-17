@@ -1636,20 +1636,24 @@ app.get("/tier/:userId", async (req, res) => {
   // cap (-1 means unlimited, e.g. Pro/Team/internal) to avoid an extra
   // auth.admin lookup + count query on every /tier call for most users.
   // Pro's Deep Dive cap (monthlyDeepDiveLimit) is exposed the same way.
-  let monthlyUsage: { used: number; limit: number; resetsAt: string } | null = null;
-  let monthlyDeepDiveUsage: { used: number; limit: number; resetsAt: string } | null = null;
-  // Not for the signup trial: its caps are whole-trial totals, and the web
-  // shows these as "this month".
-  if (tier !== "signup_trial" && (config.monthlyResearchLimit !== -1 || config.monthlyDeepDiveLimit !== -1)) {
-    const periodStart = await getBillingPeriodStart(req.params.userId);
-    const resetsAt = new Date(periodStart.getFullYear(), periodStart.getMonth() + 1, periodStart.getDate()).toISOString();
+  let monthlyUsage: { used: number; limit: number; resetsAt: string; period?: "trial" } | null = null;
+  let monthlyDeepDiveUsage: { used: number; limit: number; resetsAt: string; period?: "trial" } | null = null;
+  // For the signup trial these are whole-trial totals: period "trial" tells
+  // the web to say so, and resetsAt is when the trial ends.
+  if (config.monthlyResearchLimit !== -1 || config.monthlyDeepDiveLimit !== -1) {
+    const onTrial = tier === "signup_trial";
+    const periodStart = await capPeriodStart(req.params.userId, tier);
+    const resetsAt = onTrial
+      ? new Date(periodStart.getTime() + SIGNUP_TRIAL_DAYS * 86_400_000).toISOString()
+      : new Date(periodStart.getFullYear(), periodStart.getMonth() + 1, periodStart.getDate()).toISOString();
+    const period = onTrial ? { period: "trial" as const } : {};
     if (config.monthlyResearchLimit !== -1) {
       const used = await getMonthlyResearchUsage(req.params.userId, periodStart);
-      monthlyUsage = { used, limit: config.monthlyResearchLimit, resetsAt };
+      monthlyUsage = { used, limit: config.monthlyResearchLimit, resetsAt, ...period };
     }
     if (config.monthlyDeepDiveLimit !== -1) {
       const used = await getMonthlyDeepDiveUsage(req.params.userId, periodStart);
-      monthlyDeepDiveUsage = { used, limit: config.monthlyDeepDiveLimit, resetsAt };
+      monthlyDeepDiveUsage = { used, limit: config.monthlyDeepDiveLimit, resetsAt, ...period };
     }
   }
 

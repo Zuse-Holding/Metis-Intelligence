@@ -6,7 +6,7 @@ import { createClient } from "../lib/supabase/client";
 import { useResearch } from "../lib/research-context";
 import { useTier } from "../lib/tier-context";
 import { BUSINESS_INTELLIGENCE_PATH, DILIGENCE_URL } from "../lib/products";
-import { upgradeTarget, usageRows } from "../lib/usage";
+import { trialEnds, upgradeTarget, usageRows } from "../lib/usage";
 import { isEnabled } from "../lib/flags";
 import { Spinner } from "./Skeleton";
 import styles from "./Sidebar.module.css";
@@ -56,7 +56,7 @@ export default function Sidebar() {
   // button; Pro only once a cap is near, since Team is a sales email.
   const usage = usageRows({ monthlyUsage, monthlyDeepDiveUsage, windowUsage });
   const nearLimit = usage.some(r => r.status !== "ok");
-  const upgrade = upgradeTarget(tier);
+  const upgrade = upgradeTarget(tier, trialEnds({ monthlyUsage, monthlyDeepDiveUsage }));
   const showUpgrade = !!upgrade && (tier !== "pro" || nearLimit);
 
   // Nav items are click-handlers rather than <Link>s, so there's no
@@ -143,7 +143,7 @@ export default function Sidebar() {
               </div>
               {row.status !== "ok" && (
                 <div className={`${styles.meterNote} ${styles[row.status]}`}>
-                  {row.status === "danger" ? "Limit reached" : "Almost out"}{row.resets ? ` · resets ${row.resets}` : ""}
+                  {row.status === "danger" ? "Limit reached" : "Almost out"}{row.resets ? ` · resets ${row.resets}` : row.ends ? ` · trial ends ${row.ends}` : ""}
                 </div>
               )}
             </div>
