@@ -31,6 +31,7 @@ export default function PrivacyPage() {
           <li><strong>Research activity</strong> — the companies, people, and products you search for, and the reports and watchlists you create, so we can serve them back to you.</li>
           <li><strong>Usage data</strong> — basic technical logs (timestamps, request counts) needed to operate the service and enforce plan limits.</li>
           <li><strong>Product analytics</strong> — a small set of events (for example: signed up, ran a report, hit a plan limit, started checkout), tied to your account ID, so we can see which features get used. Event data doesn&apos;t include the names you research or the contents of your reports.</li>
+          <li><strong>Website visits</strong> — pages viewed, the referring site, browser and device type, and country, counted without cookies by analytics software we host ourselves (Umami). It doesn&apos;t store your IP address and isn&apos;t shared with anyone.</li>
           <li><strong>Billing information</strong> — your plan and subscription status. Card details go to our payment processor and never reach our servers.</li>
         </ul>
         <p>We don&apos;t run advertising trackers.</p>

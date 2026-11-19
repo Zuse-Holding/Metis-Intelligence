@@ -18,14 +18,22 @@ const posthogOrigin = process.env.NEXT_PUBLIC_POSTHOG_KEY
   ? new URL(process.env.NEXT_PUBLIC_POSTHOG_HOST ?? "https://us.i.posthog.com").origin
   : "";
 
+// Website visit counts (cookieless, self-hosted Umami on Railway). The script
+// loads and reports only when both NEXT_PUBLIC_UMAMI_SRC and
+// NEXT_PUBLIC_UMAMI_WEBSITE_ID are set (see web/components/UmamiScript.tsx).
+const umamiOrigin =
+  process.env.NEXT_PUBLIC_UMAMI_SRC && process.env.NEXT_PUBLIC_UMAMI_WEBSITE_ID
+    ? new URL(process.env.NEXT_PUBLIC_UMAMI_SRC).origin
+    : "";
+
 const CSP = [
   `default-src 'self'`,
   // 'unsafe-eval' only for next dev's hot reload; production doesn't need it.
-  `script-src 'self' 'unsafe-inline'${process.env.NODE_ENV === "development" ? " 'unsafe-eval'" : ""}`,
+  `script-src 'self' 'unsafe-inline'${process.env.NODE_ENV === "development" ? " 'unsafe-eval'" : ""}${umamiOrigin ? ` ${umamiOrigin}` : ""}`,
   `style-src 'self' 'unsafe-inline' https://fonts.googleapis.com`,
   `font-src 'self' https://fonts.gstatic.com`,
   `img-src 'self' data: https:`,
-  `connect-src 'self' https://api.stripe.com${supabaseOrigin ? ` ${supabaseOrigin}` : ""}${posthogOrigin ? ` ${posthogOrigin}` : ""}`,
+  `connect-src 'self' https://api.stripe.com${supabaseOrigin ? ` ${supabaseOrigin}` : ""}${posthogOrigin ? ` ${posthogOrigin}` : ""}${umamiOrigin ? ` ${umamiOrigin}` : ""}`,
   `frame-src https://js.stripe.com https://hooks.stripe.com`,
   `frame-ancestors 'none'`,
   `base-uri 'self'`,
