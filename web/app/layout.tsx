@@ -8,6 +8,7 @@ import { UsageLimitBanner } from "../components/UsageLimitBanner";
 import { SessionGuard } from "../components/SessionGuard";
 import { SrcCapture } from "../components/SrcCapture";
 import { Analytics } from "@vercel/analytics/next";
+import { UmamiScript } from "../components/UmamiScript";
 
 export const metadata: Metadata = {
   // Absolute URLs for the generated social preview image (app/opengraph-image.tsx).
@@ -52,6 +53,7 @@ export default function RootLayout({
           </TierProvider>
         </ResearchProvider>
         <Analytics />
+        <UmamiScript />
       </body>
     </html>
   );
